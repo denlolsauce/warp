@@ -1,0 +1,41 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+.next/
+out/
+build/
+*.tsbuildinfo
+
+# claude code local settings
+.claude/settings.local.json
+
+# env
+.env
+.env.local
+.env.*.local
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# editors / os
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+
+# python
+pipeline/.venv/
+pipeline/__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# prisma
+apps/web/prisma/dev.db
+
+# raw capture footage, not source
+/WhatsApp Video*.mp4

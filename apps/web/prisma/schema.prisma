@@ -1,0 +1,119 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum TourStatus {
+  DRAFT
+  UPLOADED
+  EXTRACTING
+  SFM
+  TRAINING
+  COMPRESSING
+  PUBLISHED
+  FAILED
+}
+
+enum VideoRole {
+  OVERVIEW
+  AREA
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  createdAt     DateTime  @default(now())
+  credits       Int       @default(40)
+
+  accounts Account[]
+  sessions Session[]
+  tours    Tour[]
+}
+
+// Auth.js (@auth/prisma-adapter) standard schema — required table shapes,
+// not application design choices; see https://authjs.dev/getting-started/adapters/prisma
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Tour {
+  id          String     @id @default(cuid())
+  userId      String
+  name        String
+  status      TourStatus @default(DRAFT)
+  manifestUrl String?
+  createdAt   DateTime   @default(now())
+
+  user   User    @relation(fields: [userId], references: [id])
+  videos Video[]
+  jobs   Job[]
+
+  @@index([userId])
+}
+
+model Video {
+  id          String    @id @default(cuid())
+  tourId      String
+  role        VideoRole
+  areaName    String?
+  floor       String?
+  storageKey  String
+  durationSec Float?
+  uploadedAt  DateTime  @default(now())
+
+  tour Tour @relation(fields: [tourId], references: [id])
+
+  @@index([tourId])
+}
+
+model Job {
+  id           String    @id @default(cuid())
+  tourId       String
+  stage        String
+  state        String
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  errorMessage String?
+
+  tour Tour @relation(fields: [tourId], references: [id])
+
+  @@index([tourId])
+}

@@ -1,0 +1,16 @@
+{
+  "name": "portal",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev": "pnpm -r run dev",
+    "typecheck": "pnpm -r run typecheck",
+    "prisma:migrate": "pnpm --filter @portal/web run prisma:migrate",
+    "prisma:seed": "pnpm --filter @portal/web run prisma:seed"
+  }
+}

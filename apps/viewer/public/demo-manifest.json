@@ -1,0 +1,25 @@
+{
+  "tourId": "demo-tour",
+  "version": 1,
+  "upAxis": [0, 1, 0],
+  "floorY": 0,
+  "overview": {
+    "common": "/overview.sog",
+    "chunks": {}
+  },
+  "areas": [
+    {
+      "id": "00_kitchen",
+      "name": "kitchen",
+      "floor": "0",
+      "splatUrl": "/kitchen.sog",
+      "bbox": [[-1, 0.5, -2.5], [1, 2.7, -0.5]],
+      "spawn": { "pos": [0, 1.6, 3], "yaw": 0 },
+      "thresholds": []
+    }
+  ],
+  "nav": {
+    "nodes": [[0, 1.6, 3], [0, 1.6, 0]],
+    "edges": [[0, 1]]
+  }
+}
