@@ -9,12 +9,15 @@ from colmap_fixtures import build_synthetic_reconstruction
 from portal_pipeline.errors import PipelineError
 from portal_pipeline.train import (
     AREA_TRAIN_CONFIG,
+    GSPLAT_BASE_MAX_STEPS,
     OVERVIEW_TRAIN_CONFIG,
     TrainConfig,
     default_train_config,
     detect_gpu_count,
+    effective_max_steps,
     link_images_dir,
     split_reconstruction,
+    steps_scaler_for,
     train_all,
 )
 
@@ -156,6 +159,32 @@ def test_train_all_respects_gpu_semaphore(tmp_path: Path, monkeypatch):
     assert len(calls) == 5
 
 
+def test_train_all_lets_other_areas_finish_when_one_fails(tmp_path: Path, monkeypatch):
+    # Areas share one GPU semaphore, so a naive fail-fast gather() would
+    # cancel every area still queued behind whichever one failed — losing
+    # real training work for areas unrelated to the failure. Confirmed the
+    # hard way against the real pipeline: killing one area's hung subprocess
+    # took a completely untouched sibling down with it.
+    completed: list[str] = []
+
+    async def fake_run_command_async(stage: str, cmd: list[str]) -> None:
+        folder_name = stage.split(":", 1)[1]
+        if folder_name == "01_area":
+            raise PipelineError("train:01_area", "simulated hung export, killed")
+        await asyncio.sleep(0.01)
+        completed.append(folder_name)
+
+    monkeypatch.setattr("portal_pipeline.train.run_command_async", fake_run_command_async)
+
+    configs = {f"{i:02d}_area": AREA_TRAIN_CONFIG for i in range(3)}
+    results = asyncio.run(train_all(tmp_path / "sub", tmp_path / "out", configs, gpu_count=1))
+
+    assert sorted(completed) == ["00_area", "02_area"]
+    assert results["00_area"] is None
+    assert results["02_area"] is None
+    assert isinstance(results["01_area"], PipelineError)
+
+
 def test_detect_gpu_count_is_at_least_one():
     assert detect_gpu_count() >= 1
 
@@ -195,3 +224,70 @@ def test_link_images_dir_reraises_on_non_windows(tmp_path: Path, monkeypatch):
 
     with pytest.raises(OSError, match="no symlink privilege"):
         link_images_dir(tmp_path / "images", tmp_path / "frames")
+
+
+@pytest.mark.parametrize("config", [OVERVIEW_TRAIN_CONFIG, AREA_TRAIN_CONFIG])
+def test_shipped_configs_round_trip_through_steps_scaler(config: TrainConfig):
+    # --steps-scaler is a multiplier on gsplat's own defaults, so the shipped
+    # step counts have to divide GSPLAT_BASE_MAX_STEPS exactly or the trainer
+    # quietly runs a slightly different number of steps than asked for.
+    assert effective_max_steps(steps_scaler_for(config.max_steps)) == config.max_steps
+
+
+def test_train_one_passes_steps_scaler_not_max_steps(tmp_path: Path, monkeypatch):
+    # Passing --max-steps leaves MCMCStrategy.refine_stop_iter at its 25_000
+    # default (simple_trainer only rescales it via cfg.steps_scaler), so the
+    # strategy keeps relocating gaussians to the last step and they ship
+    # unconverged. Guard the flag choice, not just the value.
+    captured: list[list[str]] = []
+
+    async def fake_run_command_async(stage: str, cmd: list[str]) -> None:
+        captured.append(cmd)
+
+    monkeypatch.setattr("portal_pipeline.train.run_command_async", fake_run_command_async)
+
+    config = TrainConfig(cap_max=600_000, max_steps=15_000, sh_degree=2)
+    asyncio.run(train_all(tmp_path / "sub", tmp_path / "out", {"00_a": config}, gpu_count=1))
+
+    cmd = captured[0]
+    assert "--max-steps" not in cmd
+    assert cmd[cmd.index("--steps-scaler") + 1] == f"{15_000 / GSPLAT_BASE_MAX_STEPS:.6f}"
+
+
+def test_train_one_enables_antialiasing_and_bilateral_grid(tmp_path: Path, monkeypatch):
+    captured: list[list[str]] = []
+
+    async def fake_run_command_async(stage: str, cmd: list[str]) -> None:
+        captured.append(cmd)
+
+    monkeypatch.setattr("portal_pipeline.train.run_command_async", fake_run_command_async)
+
+    asyncio.run(
+        train_all(tmp_path / "sub", tmp_path / "out", {"00_a": AREA_TRAIN_CONFIG}, gpu_count=1)
+    )
+
+    assert "--antialiased" in captured[0]
+    assert "--use-bilateral-grid" in captured[0]
+
+
+def test_train_one_can_opt_out_of_the_quality_flags(tmp_path: Path, monkeypatch):
+    captured: list[list[str]] = []
+
+    async def fake_run_command_async(stage: str, cmd: list[str]) -> None:
+        captured.append(cmd)
+
+    monkeypatch.setattr("portal_pipeline.train.run_command_async", fake_run_command_async)
+
+    config = TrainConfig(antialiased=False, use_bilateral_grid=False)
+    asyncio.run(train_all(tmp_path / "sub", tmp_path / "out", {"00_a": config}, gpu_count=1))
+
+    assert "--no-antialiased" in captured[0]
+    assert "--no-use-bilateral-grid" in captured[0]
+
+
+def test_shipped_configs_enable_antialiasing_together_with_the_viewer():
+    # viewer.ts sets app.scene.gsplat.antiAlias = true unconditionally. If these
+    # ever default to False the two sides disagree and small/distant gaussians
+    # render too opaque, so this pins them as a matched pair.
+    assert OVERVIEW_TRAIN_CONFIG.antialiased
+    assert AREA_TRAIN_CONFIG.antialiased

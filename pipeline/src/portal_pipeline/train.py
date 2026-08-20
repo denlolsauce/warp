@@ -17,7 +17,39 @@ logger = logging.getLogger(__name__)
 # separate from this package's Python version) — under `uv run`, a bare
 # "python" on PATH resolves to *this* package's venv, not that one. Point
 # PORTAL_GSPLAT_PYTHON at the training venv's interpreter explicitly.
-GSPLAT_TRAINER_PYTHON = os.environ.get("PORTAL_GSPLAT_PYTHON", "python")
+#
+# Read lazily (a function, not a module-level constant) rather than once at
+# import time: worker.py does `from .train import run_train` at its own
+# module level, which runs this module's top-level code — including
+# configure_tool_paths()'s os.environ.setdefault(...) — before worker.main()
+# ever calls configure_tool_paths(). A constant computed here would freeze at
+# "python" and stay there for the life of the process no matter what
+# configure_tool_paths() or PORTAL_GSPLAT_PYTHON later set (confirmed the
+# hard way: a real run failed with "No module named gsplat_trainer" because
+# it silently launched the wrong interpreter, not the training venv's).
+def gsplat_trainer_python() -> str:
+    return os.environ.get("PORTAL_GSPLAT_PYTHON", "python")
+
+
+# simple_trainer.py's own default for max_steps. --steps-scaler (see
+# train_one) is a single multiplier applied to *every* step-count default at
+# once, so the effective step count is int(GSPLAT_BASE_MAX_STEPS * scaler).
+# Keep this in sync if the pinned gsplat checkout's default ever changes —
+# effective_max_steps() below logs a warning when the round-trip is inexact,
+# which is what a drifted default would look like.
+GSPLAT_BASE_MAX_STEPS = 30_000
+
+
+def steps_scaler_for(max_steps: int) -> float:
+    return max_steps / GSPLAT_BASE_MAX_STEPS
+
+
+def effective_max_steps(scaler: float) -> int:
+    """The step count simple_trainer will actually run for a given scaler.
+
+    Mirrors Config.adjust_steps()'s `int(self.max_steps * factor)`.
+    """
+    return int(GSPLAT_BASE_MAX_STEPS * scaler)
 
 
 @dataclass(frozen=True)
@@ -26,6 +58,21 @@ class TrainConfig:
     cap_max: int = 400_000
     max_steps: int = 12_000
     sh_degree: int = 1
+    # Mip-Splatting screen-space compensation. Only correct because the viewer
+    # enables the matching GSPLAT_AA define (see viewer.ts) — PlayCanvas 2.21.3
+    # computes the identical sqrt(detOrig/detBlur) factor with the same 0.3px
+    # dilation as gsplat's eps2d default. Flipping one side without the other
+    # mis-calibrates the opacity of small/distant gaussians, so these two
+    # settings must be changed together or not at all.
+    antialiased: bool = True
+    # Learns a per-training-image colour/exposure transform. Phone auto-exposure
+    # and auto-white-balance drift between frames; without this the optimiser
+    # cannot fit two brightnesses of the same surface with one opaque gaussian
+    # and hedges with stacked translucent ones, which is the haze look. The grid
+    # is applied to the *rendered* image inside the training loss only
+    # (simple_trainer.py's `slice(...)` call), so the exported PLY stays in
+    # canonical colour space and needs no viewer-side counterpart.
+    use_bilateral_grid: bool = True
 
 
 OVERVIEW_TRAIN_CONFIG = TrainConfig(cap_max=400_000, max_steps=12_000, sh_degree=1)
@@ -123,13 +170,21 @@ async def train_one(
     semaphore: asyncio.Semaphore,
 ) -> None:
     async with semaphore:
+        scaler = steps_scaler_for(config.max_steps)
+        actual_steps = effective_max_steps(scaler)
+        if actual_steps != config.max_steps:
+            logger.warning(
+                "%s: requested %d steps, --steps-scaler %.6f resolves to %d "
+                "(pick a max_steps that divides %d evenly for an exact match)",
+                folder_name, config.max_steps, scaler, actual_steps, GSPLAT_BASE_MAX_STEPS,
+            )
         await run_command_async(
             f"train:{folder_name}",
             [
                 # gsplat_trainer is a tyro-based CLI (real flags are hyphenated,
                 # and cap_max lives under the strategy sub-config) — verified
                 # against the actual examples/simple_trainer.py, not guessed.
-                GSPLAT_TRAINER_PYTHON, "-m", "gsplat_trainer", config.method,
+                gsplat_trainer_python(), "-m", "gsplat_trainer", config.method,
                 "--data-dir", str(sub_dir / folder_name),
                 "--result-dir", str(out_dir / folder_name),
                 # extract already downsamples to a fixed height; don't let the
@@ -137,7 +192,17 @@ async def train_one(
                 # pre-downsampled images_<N>/ folder that doesn't exist.
                 "--data-factor", "1",
                 "--strategy.cap-max", str(config.cap_max),
-                "--max-steps", str(config.max_steps),
+                # NOT --max-steps. Setting max_steps directly leaves every other
+                # step-count default at its 30k-run value, and the one that
+                # matters is MCMCStrategy.refine_stop_iter (default 25_000):
+                # simple_trainer only rescales it inside Config.adjust_steps(),
+                # which runs off cfg.steps_scaler. With --max-steps 12000 the
+                # strategy therefore kept relocating and adding gaussians until
+                # step 11_999, so the final relocated batch got ~100 steps to
+                # converge and shipped as unconverged translucent blobs — haze.
+                # --steps-scaler rescales max_steps, refine_start/stop/every,
+                # sh_degree_interval and the eval/save/ply step lists together.
+                "--steps-scaler", f"{steps_scaler_for(config.max_steps):.6f}",
                 "--sh-degree", str(config.sh_degree),
                 # compress needs a real PLY on disk; --save-ply defaults to
                 # False and the export at the final step is silently skipped
@@ -160,19 +225,34 @@ async def train_one(
                 # instead, which nav.py already assumes (its distances are
                 # hardcoded in metres against that same raw frame).
                 "--no-normalize-world-space",
+                *(["--antialiased"] if config.antialiased else ["--no-antialiased"]),
+                *(
+                    ["--use-bilateral-grid"]
+                    if config.use_bilateral_grid
+                    else ["--no-use-bilateral-grid"]
+                ),
             ],
         )
 
 
 async def train_all(
     sub_dir: Path, out_dir: Path, configs: dict[str, TrainConfig], gpu_count: int
-) -> None:
+) -> dict[str, BaseException | None]:
     semaphore = asyncio.Semaphore(gpu_count)
+    folder_names = list(configs.keys())
     tasks = [
-        train_one(sub_dir, out_dir, folder_name, config, semaphore)
-        for folder_name, config in configs.items()
+        train_one(sub_dir, out_dir, folder_name, configs[folder_name], semaphore)
+        for folder_name in folder_names
     ]
-    await asyncio.gather(*tasks)
+    # return_exceptions=True: areas share one GPU semaphore, so a fail-fast
+    # gather() here would cancel every area still queued behind whichever one
+    # failed first — losing real training work for areas that had nothing to
+    # do with the failure. Confirmed the hard way: killing one area's hung
+    # subprocess to free the GPU slot for the next area took a completely
+    # untouched sibling area down with it, which never even got as far as
+    # creating a result directory.
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    return dict(zip(folder_names, results))
 
 
 def run_train(workdir: Path, config_override: TrainConfig | None = None) -> None:
@@ -199,4 +279,12 @@ def run_train(workdir: Path, config_override: TrainConfig | None = None) -> None
     gpu_count = detect_gpu_count()
     logger.info("training %d area(s) with %d concurrent GPU slot(s)", len(configs), gpu_count)
 
-    asyncio.run(train_all(sub_dir, out_dir, configs, gpu_count))
+    results = asyncio.run(train_all(sub_dir, out_dir, configs, gpu_count))
+    failures = {name: error for name, error in results.items() if error is not None}
+    if failures:
+        detail = "\n".join(f"{name}: {error}" for name, error in failures.items())
+        raise PipelineError(
+            "train",
+            f"{len(failures)}/{len(results)} area(s) failed to train: {', '.join(failures)}",
+            detail,
+        )

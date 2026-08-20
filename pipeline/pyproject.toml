@@ -4,14 +4,21 @@ version = "0.1.0"
 description = "Portal capture-to-splat processing pipeline"
 requires-python = ">=3.11,<3.12"
 dependencies = [
+    "boto3>=1.43.72",
     "numpy>=2.4.6",
     "opencv-python-headless>=5.0.0.93",
+    "pillow>=12.3.0",
     "plyfile>=1.1.5",
+    "psycopg[binary]>=3.3.4",
     "pycolmap>=4.1.1",
+    "python-dotenv>=1.2.2",
+    "redis>=8.1.0",
+    "requests>=2.34.2",
 ]
 
 [project.scripts]
 portal-pipeline = "portal_pipeline.cli:main"
+portal-worker = "portal_pipeline.worker:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -2,13 +2,22 @@ import * as pc from "playcanvas";
 import type { SceneManifest } from "@portal/schema";
 import { fetchManifest } from "./manifest";
 import { createDevice } from "./device";
-import { applyMeasuredGaussianBudget } from "./budget";
+import { applyMeasuredGaussianBudget, SPLAT_BUDGET_LOW } from "./budget";
 import { LoadingOverlay } from "./loading";
 import { PortalCameraController } from "./cameraController";
 import { DebugOverlay } from "./debugOverlay";
 import type { Point2 } from "./navigation";
 import { isMobileViewport } from "./virtualJoystick";
-import { AreaVisibility } from "./areaVisibility";
+import { AreaStreaming } from "./areaStreaming";
+import { Minimap } from "./minimap";
+import { HudControls } from "./hudControls";
+
+// The gaussian budget tier already reflects measured GPU frame time
+// (CLAUDE.md: never decide budgets from user-agent) — reusing it for the
+// resident-area cap keeps both memory budgets driven by the same signal
+// instead of introducing a second, viewport-based notion of "low-end".
+const RESIDENT_AREA_BUDGET_DESKTOP = 4;
+const RESIDENT_AREA_BUDGET_LOW_TIER = 2;
 
 interface LoadedSplat {
   entity: pc.Entity;
@@ -34,7 +43,9 @@ export class PortalViewer {
   private loadToken = 0;
   private controller: PortalCameraController | null = null;
   private debugOverlay: DebugOverlay | null = null;
-  private areaVisibility: AreaVisibility | null = null;
+  private areaStreaming: AreaStreaming | null = null;
+  private minimap: Minimap | null = null;
+  private hudControls: HudControls | null = null;
   private cameraEntity: pc.Entity | null = null;
   private controlsHint: HTMLElement | null = null;
   private fps = 60;
@@ -62,12 +73,22 @@ export class PortalViewer {
       const app = new pc.Application(this.canvas, { graphicsDevice: device });
       this.app = app;
 
+      // Must stay in lockstep with TrainConfig.antialiased in the pipeline.
+      // This sets the GSPLAT_AA define, which multiplies each gaussian's alpha
+      // by sqrt(detOrig/detBlur) for the same 0.3px screen-space dilation that
+      // gsplat's antialiased rasterize mode trains against. The splats are
+      // optimised with that compensation applied, so rendering without it
+      // leaves small/distant gaussians too opaque — enabling it on one side
+      // only is worse than having it on neither.
+      app.scene.gsplat.antiAlias = true;
+
       app.setCanvasFillMode(pc.FILLMODE_FILL_WINDOW);
       app.setCanvasResolution(pc.RESOLUTION_AUTO);
       window.addEventListener("resize", this.handleResize);
 
       this.setupCamera(app);
       this.setupController(app, manifest);
+      this.setupHud();
       app.start();
 
       let budgetMeasured = false;
@@ -78,7 +99,13 @@ export class PortalViewer {
 
         // Measure against a scene that's actually rendering something, not an
         // empty canvas, so the budget reflects real gaussian-splat render cost.
-        void applyMeasuredGaussianBudget(app);
+        // Not awaited — area streaming shouldn't block initial load on a ~2s
+        // measurement (see AreaStreaming's constructor comment).
+        void applyMeasuredGaussianBudget(app).then((budget) => {
+          this.areaStreaming?.setBudget(
+            budget === SPLAT_BUDGET_LOW ? RESIDENT_AREA_BUDGET_LOW_TIER : RESIDENT_AREA_BUDGET_DESKTOP,
+          );
+        });
         budgetMeasured = true;
 
         const chunkEntries = Object.entries(manifest.overview.chunks);
@@ -92,18 +119,15 @@ export class PortalViewer {
         }
       }
 
-      if (manifest.areas.length > 0) {
-        overlay.setStatus(`Loading ${manifest.areas.length} area(s)…`);
-        await Promise.all(
-          manifest.areas.map((area) => this.loadSplat(app, area.id, area.splatUrl, overlay)),
-        );
-      }
-
       if (!budgetMeasured) {
         void applyMeasuredGaussianBudget(app);
       }
 
-      this.areaVisibility = new AreaVisibility(manifest, (name) => this.findSplatEntity(name));
+      // Areas stream in on demand (AreaStreaming) rather than loading here —
+      // the overview substrate above is everything initial load waits on.
+      this.areaStreaming = new AreaStreaming(app, manifest, RESIDENT_AREA_BUDGET_LOW_TIER, (name) =>
+        this.findSplatEntity(name),
+      );
 
       if (token !== this.loadToken) return;
       overlay.hide();
@@ -123,7 +147,12 @@ export class PortalViewer {
     this.controller = null;
     this.debugOverlay?.destroy();
     this.debugOverlay = null;
-    this.areaVisibility = null;
+    this.areaStreaming?.destroy();
+    this.areaStreaming = null;
+    this.minimap?.destroy();
+    this.minimap = null;
+    this.hudControls?.destroy();
+    this.hudControls = null;
     this.cameraEntity = null;
     this.controlsHint?.remove();
     this.controlsHint = null;
@@ -186,31 +215,64 @@ export class PortalViewer {
     app.on("update", (dt: number) => {
       if (!this.controller || !this.cameraEntity) return;
       this.controller.update(dt, this.cameraEntity);
-      this.areaVisibility?.update(this.cameraEntity.getPosition());
+      const cameraPos = this.cameraEntity.getPosition();
+      this.areaStreaming?.update(cameraPos, this.controller.currentNodeIndex, dt);
+      this.minimap?.update({ x: cameraPos.x, z: cameraPos.z }, this.cameraEntity.getEulerAngles().y);
 
       this.fps += (1 / Math.max(dt, 1e-6) - this.fps) * 0.1;
+      const streamedBytes = this.areaStreaming?.residentBytes ?? 0;
       this.debugOverlay?.update({
         fps: this.fps,
         renderer: app.graphicsDevice.deviceType,
-        splatCount: this.splats.length,
-        residentMB: this.splats.reduce((sum, s) => sum + s.bytes, 0) / (1024 * 1024),
+        splatCount: this.splats.length + (this.areaStreaming?.residentCount ?? 0),
+        residentMB: (this.splats.reduce((sum, s) => sum + s.bytes, 0) + streamedBytes) / (1024 * 1024),
         navNodeIndex: this.controller.currentNodeIndex,
+        areasResident: this.areaStreaming?.residentCount ?? 0,
+        areasLoading: this.areaStreaming?.loadingCount ?? 0,
+        areaBudget: this.areaStreaming?.budgetLimit ?? 0,
       });
+    });
+  }
+
+  // Minimap intentionally omitted: floorplan.py's top-down render is
+  // unreadable on real trained splats (it flattens each gaussian to a
+  // circle and ignores rotation, so large angled surfaces render as
+  // oversized blobs instead of walls/floor). Re-enable once that renderer
+  // produces something worth overlaying a nav graph on.
+  private setupHud(): void {
+    const container = this.canvas.parentElement ?? document.body;
+
+    // ?embed=1 is what TourStatus.tsx's copy-paste embed snippet carries
+    // (apps/web) — a tour published on someone else's site for their own
+    // visitors. The creator's own preview iframe on their /tours/[id] page
+    // uses the same viewer URL without it, so the badge shows there.
+    const isEmbed = new URLSearchParams(window.location.search).get("embed") === "1";
+    this.hudControls = new HudControls(container, {
+      onReset: () => this.controller?.resetToSpawn(),
+      isEmbed,
     });
   }
 
   private showControlsHint(): void {
     const hint = document.createElement("div");
+    const mobile = isMobileViewport();
     // Touch has no keyboard, so "WASD/arrows" doesn't apply — the joystick
     // (virtualJoystick.ts) is the touch equivalent.
-    hint.textContent = isMobileViewport()
-      ? "Drag to look · Joystick to move · Tap to walk there"
+    // Shorter on mobile, not just keyboard-free: the full desktop string
+    // doesn't fit top-left alongside the minimap (below) on a narrow screen.
+    hint.textContent = mobile
+      ? "Drag to look · Joystick to move"
       : "Drag to look · WASD/arrows to move · Click/tap to walk there · D for debug";
+    // Bottom-center collides on mobile: the joystick (bottom-left) and the
+    // reset/fullscreen/badge cluster (hudControls.ts, bottom-right) already
+    // claim that whole row on a narrow screen. Top-left is what's left —
+    // the minimap (top-right) and debug overlay (top-left but hidden until
+    // 'D' is pressed) don't compete with it there. Desktop keeps the
+    // original bottom-center, where none of that crowding exists.
+    const positionStyle = mobile ? "left:12px;top:12px;" : "left:50%;bottom:12px;transform:translateX(-50%);";
     hint.setAttribute(
       "style",
-      // Bottom-center, not bottom-left: the movement joystick occupies the
-      // bottom-left corner on touch devices.
-      "position:absolute;left:50%;bottom:12px;transform:translateX(-50%);" +
+      `position:absolute;${positionStyle}` +
         "padding:6px 10px;border-radius:4px;white-space:nowrap;" +
         "background:rgba(10,10,12,0.6);color:#e8e8ea;font:12px system-ui,sans-serif;" +
         "pointer-events:none;z-index:5;",

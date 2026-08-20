@@ -6,6 +6,9 @@ export interface DebugStats {
   splatCount: number;
   residentMB: number;
   navNodeIndex: number;
+  areasResident: number;
+  areasLoading: number;
+  areaBudget: number;
 }
 
 export class DebugOverlay {
@@ -38,7 +41,8 @@ export class DebugOverlay {
       `Renderer: ${stats.renderer}\n` +
       `Splats loaded: ${stats.splatCount}\n` +
       `Resident: ${stats.residentMB.toFixed(1)} MB\n` +
-      `Nav node: ${stats.navNodeIndex}`;
+      `Nav node: ${stats.navNodeIndex}\n` +
+      `Areas: ${stats.areasResident}/${stats.areaBudget} (+${stats.areasLoading} loading)`;
   }
 
   destroy(): void {

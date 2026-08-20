@@ -34,6 +34,9 @@ pipeline/__pycache__/
 *.pyc
 .pytest_cache/
 
+# worker scratch space: extracted frames, sparse models, trained PLYs
+pipeline/work/
+
 # prisma
 apps/web/prisma/dev.db
 

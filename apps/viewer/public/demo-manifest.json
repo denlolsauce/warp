@@ -13,7 +13,7 @@
       "name": "kitchen",
       "floor": "0",
       "splatUrl": "/kitchen.sog",
-      "bbox": [[-1, 0.5, -2.5], [1, 2.7, -0.5]],
+      "bbox": [[-2, 0.5, -2.5], [2, 2.7, 3.5]],
       "spawn": { "pos": [0, 1.6, 3], "yaw": 0 },
       "thresholds": []
     }

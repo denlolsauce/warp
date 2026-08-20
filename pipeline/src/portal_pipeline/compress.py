@@ -9,6 +9,7 @@ import pycolmap
 
 from .capture_manifest import read_capture_manifest
 from .errors import PipelineError
+from .floorplan import render_floorplan
 from .plysplit import BBox, inside_box_mask, load_ply_positions, write_ply_subset
 from .subprocess_utils import resolve_executable, run_command
 
@@ -30,6 +31,10 @@ class CompressEntry:
     # OVERVIEW only: area id -> that area's overview-chunk sog path. None
     # for AREA entries and for an overview that wasn't split (no areas).
     chunks: dict[str, str] | None = None
+    # OVERVIEW only: top-down PNG + the world-space [[minX,minZ],[maxX,maxZ]]
+    # it covers, for the viewer's minimap. None for AREA entries.
+    floorplan_path: str | None = None
+    floorplan_bounds: list[list[float]] | None = None
 
 
 def write_compress_manifest(compressed_dir: Path, entries: dict[str, CompressEntry]) -> None:
@@ -108,6 +113,17 @@ def detect_up_axis_flip(sparse_dir: Path) -> bool:
     Only the case verified against a real capture (vertical axis = Y) is
     handled; a reconstruction whose low-variance axis comes out as X or Z
     instead raises rather than silently applying an unverified rotation.
+
+    KNOWN WEAK SPOT (confirmed against a real capture, not hypothetical): the
+    median/mean sign heuristic assumes a clean floor-dense/ceiling-sparse
+    split, which a staircase breaks — steps spread points across many
+    heights instead of two clusters. On a real hallway capture that included
+    a staircase, median and mean landed only ~0.6% of the point cloud's
+    vertical spread apart (0.560 vs 0.599), and the heuristic's answer was
+    wrong (confirmed by eye once rendered). No fix is applied here since a
+    reliable confidence threshold isn't derivable from a single failure
+    case; if this recurs, that's the first place to look; a manual
+    needs_flip override was used for the affected capture in the meantime.
     """
     reconstruction = pycolmap.Reconstruction(str(sparse_dir))
     centres = np.array([image.projection_center() for image in reconstruction.images.values()])
@@ -338,12 +354,21 @@ def run_compress(workdir: Path) -> None:
         overview_bbox = bbox_from_submodel(overview_sparse_path, needs_flip)
         overview_ply_path = find_trained_ply(out_dir / overview_folder)
 
+        floorplan_path = compressed_dir / "floorplan.png"
+        floorplan_bounds = render_floorplan(overview_ply_path, needs_flip, floorplan_path)
+        logger.info("%s: floorplan -> %s (bounds=%s)", overview_folder, floorplan_path.name, floorplan_bounds)
+
         if area_raw_bboxes:
             common_sog_path, common_size, chunk_paths = chunk_overview(
                 overview_ply_path, area_raw_bboxes, compressed_dir, overview_folder, flags, needs_flip
             )
             entries[overview_folder] = CompressEntry(
-                bbox=overview_bbox, sog_path=str(common_sog_path), sog_bytes=common_size, chunks=chunk_paths
+                bbox=overview_bbox,
+                sog_path=str(common_sog_path),
+                sog_bytes=common_size,
+                chunks=chunk_paths,
+                floorplan_path=str(floorplan_path),
+                floorplan_bounds=floorplan_bounds,
             )
             logger.info(
                 "%s: split into %d area chunk(s) + common (%.1f MB)",
@@ -357,7 +382,13 @@ def run_compress(workdir: Path) -> None:
             sog_path = compressed_dir / f"{overview_folder}.sog"
             convert_to_sog(overview_ply_path, sog_path, flags, needs_flip)
             size = check_sog_size(overview_folder, sog_path)
-            entries[overview_folder] = CompressEntry(bbox=overview_bbox, sog_path=str(sog_path), sog_bytes=size)
+            entries[overview_folder] = CompressEntry(
+                bbox=overview_bbox,
+                sog_path=str(sog_path),
+                sog_bytes=size,
+                floorplan_path=str(floorplan_path),
+                floorplan_bounds=floorplan_bounds,
+            )
             logger.info(
                 "%s: bbox=%s sog=%s (%.1f MB)",
                 overview_folder,

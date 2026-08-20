@@ -50,10 +50,15 @@ export class PortalCameraController {
   private walkTo: WalkTo | null = null;
   currentNodeIndex: number;
 
+  private readonly spawnPos: Point2;
+  private readonly spawnYaw: number;
+
   constructor(manifest: SceneManifest, canvas: HTMLCanvasElement, startPos: Point2, initialYaw: number) {
     this.graph = buildNavGraph(manifest.nav);
     this.floorY = manifest.floorY;
     this.canvas = canvas;
+    this.spawnPos = startPos;
+    this.spawnYaw = initialYaw;
 
     this.targetX = startPos.x;
     this.targetZ = startPos.z;
@@ -64,6 +69,23 @@ export class PortalCameraController {
 
     this.input = new InputState(canvas, initialYaw);
     this.currentNodeIndex = nearestNode(this.graph, startPos);
+  }
+
+  // "Reset view" — an instant snap back to spawn, not an animated walk:
+  // this exists for when the user is lost/stuck, so getting there
+  // immediately matters more than a smooth transition (which would also
+  // have to path back through wherever they currently are).
+  resetToSpawn(): void {
+    this.walkTo = null;
+    this.targetX = this.spawnPos.x;
+    this.targetZ = this.spawnPos.z;
+    this.springX.reset(this.spawnPos.x);
+    this.springZ.reset(this.spawnPos.z);
+    this.springYaw.reset(this.spawnYaw);
+    this.springPitch.reset(0);
+    this.input.yaw = this.spawnYaw;
+    this.input.pitch = 0;
+    this.currentNodeIndex = nearestNode(this.graph, this.spawnPos);
   }
 
   update(dt: number, camera: pc.Entity): void {
@@ -156,9 +178,15 @@ export class PortalCameraController {
     if (t < 0) return; // floor plane is behind the camera along this ray
 
     const hit: Point2 = { x: near.x + t * (far.x - near.x), z: near.z + t * (far.z - near.z) };
+    this.walkToWorldPosition(hit);
+  }
 
+  // Public entry point for a target that's already a world (x, z) position
+  // rather than a screen point to raycast — e.g. a minimap click, which
+  // maps a pixel straight to world space with no 3D scene to hit-test.
+  walkToWorldPosition(target: Point2): void {
     const startIndex = nearestNode(this.graph, { x: this.targetX, z: this.targetZ });
-    const goalIndex = nearestNode(this.graph, hit);
+    const goalIndex = nearestNode(this.graph, target);
     const routeNodes = findPath(this.graph, startIndex, goalIndex);
 
     const waypoints: Point2[] = [

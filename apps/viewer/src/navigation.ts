@@ -142,6 +142,41 @@ export function findPath(graph: NavGraph, startNode: number, goalNode: number): 
   return [startNode]; // goal unreachable (disconnected graph) — stay put rather than teleport
 }
 
+// Dijkstra seeded from several source nodes at once, giving every node its
+// graph distance to the NEAREST source in one pass. Run once per area at
+// load time (against that area's threshold nodes) so per-frame prefetch
+// checks are an O(1) array lookup rather than a pathfind — the graph never
+// changes after load, so there's nothing to invalidate.
+export function multiSourceGraphDistances(graph: NavGraph, sources: number[]): Float32Array {
+  const dist = new Float32Array(graph.positions.length).fill(Infinity);
+  const visited = new Uint8Array(graph.positions.length);
+  for (const source of sources) dist[source] = 0;
+
+  for (let iter = 0; iter < graph.positions.length; iter++) {
+    let current = -1;
+    let currentDist = Infinity;
+    for (let i = 0; i < dist.length; i++) {
+      if (!visited[i] && dist[i] < currentDist) {
+        currentDist = dist[i];
+        current = i;
+      }
+    }
+    if (current === -1) break; // remaining nodes unreachable from any source
+
+    visited[current] = 1;
+    for (const neighbor of graph.adjacency[current] ?? []) {
+      const edgeLength = Math.hypot(
+        graph.positions[current].x - graph.positions[neighbor].x,
+        graph.positions[current].z - graph.positions[neighbor].z,
+      );
+      const candidate = dist[current] + edgeLength;
+      if (candidate < dist[neighbor]) dist[neighbor] = candidate;
+    }
+  }
+
+  return dist;
+}
+
 function catmullRom(p0: Point2, p1: Point2, p2: Point2, p3: Point2, t: number): Point2 {
   const t2 = t * t;
   const t3 = t2 * t;

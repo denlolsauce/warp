@@ -207,11 +207,16 @@ def assemble_manifest(
     )
 
     overview = None
+    floorplan_url = None
+    floorplan_bounds = None
     if overview_folder is not None:
+        overview_entry = compress_manifest[overview_folder]
         overview = {
-            "common": compress_manifest[overview_folder].sog_path,
-            "chunks": compress_manifest[overview_folder].chunks or {},
+            "common": overview_entry.sog_path,
+            "chunks": overview_entry.chunks or {},
         }
+        floorplan_url = overview_entry.floorplan_path
+        floorplan_bounds = overview_entry.floorplan_bounds
 
     areas = []
     for folder_name in sorted(capture_manifest.keys()):
@@ -223,7 +228,7 @@ def assemble_manifest(
             {
                 "id": folder_name,
                 "name": capture_entry.area_name,
-                "floor": DEFAULT_FLOOR_LABEL,
+                "floor": capture_entry.floor or DEFAULT_FLOOR_LABEL,
                 "splatUrl": compress_entry.sog_path,
                 "bbox": compress_entry.bbox,
                 "spawn": compute_spawn(paths[folder_name]),
@@ -237,6 +242,8 @@ def assemble_manifest(
         "upAxis": UP_AXIS,
         "floorY": compute_floor_y(nodes),
         "overview": overview,
+        "floorplanUrl": floorplan_url,
+        "floorplanBounds": floorplan_bounds,
         "areas": areas,
         "nav": {"nodes": nodes, "edges": edges},
     }

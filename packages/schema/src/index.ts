@@ -3,6 +3,11 @@ import { z } from "zod";
 export const Vec3Schema = z.tuple([z.number(), z.number(), z.number()]);
 export type Vec3 = z.infer<typeof Vec3Schema>;
 
+// [x, z] — the floor plane, dropping the up axis. Used for the floorplan
+// image's world-space bounds.
+export const Vec2Schema = z.tuple([z.number(), z.number()]);
+export type Vec2 = z.infer<typeof Vec2Schema>;
+
 export const ThresholdSchema = z.object({
   pos: Vec3Schema,
   radius: z.number(),
@@ -42,6 +47,13 @@ export const SceneManifestSchema = z.object({
   upAxis: Vec3Schema,
   floorY: z.number(),
   overview: OverviewSchema.nullable(),
+  // Top-down render of the overview splat + the world-space [[minX,minZ],
+  // [maxX,maxZ]] it covers, for the viewer's minimap. Null under the same
+  // condition overview is null (nothing to render without one); optional
+  // (not just nullable) so manifests written before this field existed
+  // still validate — the viewer just skips the minimap without it.
+  floorplanUrl: z.string().nullish(),
+  floorplanBounds: z.tuple([Vec2Schema, Vec2Schema]).nullish(),
   areas: z.array(AreaSchema),
   nav: NavSchema,
 });

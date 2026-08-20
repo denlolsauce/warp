@@ -52,7 +52,10 @@ export function TourStatus({ tourId, initial }: { tourId: string; initial: TourS
 
   const shareUrl = `${process.env.NEXT_PUBLIC_APP_URL}/tours/${tourId}`;
   const viewerUrl = `${process.env.NEXT_PUBLIC_VIEWER_URL}/?manifest=${encodeURIComponent(data.manifestUrl ?? "")}`;
-  const embedSnippet = `<iframe src="${viewerUrl}" width="100%" height="600" style="border:0" allow="xr-spatial-tracking"></iframe>`;
+  // embed=1 tells the viewer this load is on someone else's site for their
+  // own visitors, not the creator's own preview below — that's what hides
+  // the "Powered by Warp" badge there (see viewer.ts's setupHud).
+  const embedSnippet = `<iframe src="${viewerUrl}&embed=1" width="100%" height="600" style="border:0" allow="xr-spatial-tracking"></iframe>`;
 
   return (
     <main>

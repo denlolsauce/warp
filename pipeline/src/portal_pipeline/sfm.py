@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pycolmap
 
+from .capture_manifest import read_capture_manifest
 from .errors import PipelineError
 from .subprocess_utils import run_command
 
@@ -49,16 +50,28 @@ def verify_reconstruction(sparse_dir: Path, frames_dir: Path) -> None:
 
     stats = compute_registration_stats(registered_image_names, total_by_folder)
 
+    # This message reaches the customer as-is (worker.py forwards PipelineError's
+    # text through the completion callback to Tour.errorMessage, shown verbatim
+    # by TourStatus.tsx) — so it names the video by the customer's own area name,
+    # not the internal "00_hallway"-style folder id, and explains the likely
+    # cause in plain language rather than just reporting a bare percentage.
+    capture_manifest = read_capture_manifest(frames_dir)
     failures = []
     for folder_name, (registered, total, ratio) in stats.items():
         logger.info("%s: %d/%d frames registered (%.1f%%)", folder_name, registered, total, ratio * 100)
         if ratio < MIN_REGISTERED_RATIO:
-            failures.append(f"{folder_name} ({ratio:.1%})")
+            entry = capture_manifest.get(folder_name)
+            label = entry.area_name if entry else folder_name
+            failures.append(f"{label} ({ratio:.0%} usable)")
 
     if failures:
         raise PipelineError(
             "sfm:verify",
-            f"under {MIN_REGISTERED_RATIO:.0%} of frames registered for: {', '.join(failures)}",
+            f"Reconstruction quality was too low for: {', '.join(failures)}. This usually means "
+            "long stretches of plain, low-texture surfaces (bare walls, uniform flooring) that the "
+            "3D reconstruction can't lock onto. Try reshooting that video more slowly for more "
+            "overlap between frames, or briefly add texture to bare walls (a poster, patterned "
+            "cloth) during filming.",
         )
 
 
