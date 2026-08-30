@@ -7,6 +7,7 @@ const config: Config = {
       fontFamily: {
         sans: ["var(--font-figtree)", "system-ui", "sans-serif"],
         mono: ["var(--font-plex-mono)", "ui-monospace", "monospace"],
+        studio: ["var(--font-inter)", "system-ui", "sans-serif"],
       },
       colors: {
         warp: {
@@ -36,6 +37,33 @@ const config: Config = {
           "line-2": "rgba(255,255,255,0.09)",
           "line-3": "rgba(255,255,255,0.12)",
           "line-4": "rgba(255,255,255,0.16)",
+        },
+        // Light "studio" theme, matched to the Warp desktop app reference:
+        // warm off-white surfaces, near-black ink, orange-red brand mark.
+        studio: {
+          bg: "#f2f0eb",
+          panel: "#fbfaf8",
+          card: "#ffffff",
+          well: "#f6f4f0",
+          ink: "#1c1a17",
+          heading: "#26231f",
+          body: "#3d3a34",
+          muted: "#7d786f",
+          faint: "#a29d93",
+          line: "#e6e3dc",
+          "line-2": "#dcd8d0",
+          "line-3": "#cfcabf",
+          brand: "#e2492f",
+          "brand-ink": "#2b1109",
+          dark: "#171310",
+          "dark-hi": "#2c2622",
+          amber: "#b45309",
+          "amber-bg": "#f7e8cf",
+          "amber-line": "#ead1a8",
+          green: "#3f7d4e",
+          "green-bg": "#e4efe4",
+          red: "#b3402a",
+          "red-bg": "#f7e3dd",
         },
       },
       backgroundColor: {

@@ -316,6 +316,20 @@ export function SplatViewer({
       }
       if (disposed) return;
 
+      // Probe capabilities before handing the canvas to the engine: on a
+      // device with neither backend, createGraphicsDevice's failure surfaces
+      // as an async throw inside an engine callback rather than a rejection,
+      // which would leave this promise pending and the UI on "loading" forever.
+      const hasWebgl2 = !!document.createElement("canvas").getContext("webgl2");
+      // navigator.gpu isn't in this TS lib version yet.
+      const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
+      const hasWebgpu = gpu ? !!(await gpu.requestAdapter().catch(() => null)) : false;
+      if (disposed) return;
+      if (!hasWebgl2 && !hasWebgpu) {
+        setStatus("unsupported");
+        return;
+      }
+
       let device;
       try {
         device = await pc.createGraphicsDevice(canvas, {
