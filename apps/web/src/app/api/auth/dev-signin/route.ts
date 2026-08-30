@@ -32,10 +32,19 @@ export async function POST(request: Request): Promise<Response> {
   const expires = new Date(Date.now() + SESSION_DAYS * 86_400_000);
   await prisma.session.create({ data: { sessionToken, userId: user.id, expires } });
 
+  // Auth.js switches to the __Secure- prefixed cookie name whenever the request
+  // origin is https (which it is behind the preview tunnel), so writing the
+  // plain name there creates a session the app can never read.
+  const proto =
+    request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() ??
+    new URL(request.url).protocol.replace(":", "");
+  const secure = proto === "https";
+
   const store = await cookies();
-  store.set("authjs.session-token", sessionToken, {
+  store.set(secure ? "__Secure-authjs.session-token" : "authjs.session-token", sessionToken, {
     httpOnly: true,
     sameSite: "lax",
+    secure,
     path: "/",
     expires,
   });
