@@ -29,6 +29,10 @@ EMAIL_SERVER_USER=dev
 EMAIL_SERVER_PASSWORD=dev
 EMAIL_FROM=dev@localhost
 
+# No SMTP in the sandbox, so magic links can't be delivered; enables the
+# dev-only sign-in button on /signin (refused when NODE_ENV=production).
+ALLOW_DEV_SIGNIN=true
+
 R2_ACCOUNT_ID=dev
 R2_ACCESS_KEY_ID=dev
 R2_SECRET_ACCESS_KEY=dev
