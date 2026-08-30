@@ -1,0 +1,36 @@
+# The CLI uploads from the repo root (pnpm needs the workspace root to resolve
+# `workspace:` deps), but the build's Root Directory is apps/web — so
+# everything the web app doesn't need is dead weight. Without this the upload
+# aborts: pipeline/ alone is ~9GB of captures, frames and checkpoints.
+
+# GPU pipeline: Python worker, source videos, frames, checkpoints, PLYs.
+# Never built or served by the web app.
+pipeline
+
+# The standalone viewer app and its own copies of the models. The web app
+# serves its own from apps/web/public.
+apps/viewer
+
+# Source captures at the repo root: 777MB + 427MB + 322MB. These are the
+# pipeline's *input*, nothing serves them, and each one is over Vercel's 100MB
+# per-file limit — they were the whole of the 1.5GB the first upload pushed.
+*.mp4
+
+# Secrets. `vercel link` writes a VERCEL_OIDC_TOKEN into .env.local, and env
+# vars belong in project settings rather than the upload.
+.env
+.env.*
+
+.pytest_cache
+
+# Build output and dependencies — Vercel installs and builds these itself.
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+*.tsbuildinfo
+
+.git
+.claude

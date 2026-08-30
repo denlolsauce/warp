@@ -1,3 +1,38 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    @apply bg-warp-bg text-warp-body;
+    color-scheme: dark;
+  }
+
+  ::selection {
+    background: #79dcd6;
+    color: #071113;
+  }
+
+  a {
+    @apply text-warp-accent no-underline;
+  }
+
+  a:hover {
+    @apply text-warp-accent-hi;
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    font-family: inherit;
+  }
+
+  input:focus,
+  textarea:focus,
+  select:focus {
+    outline: none;
+    border-color: #79dcd6;
+  }
+}

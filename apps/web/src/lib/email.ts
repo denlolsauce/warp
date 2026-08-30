@@ -11,12 +11,12 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-export async function sendTourReadyEmail(to: string, tourName: string, tourUrl: string): Promise<void> {
+export async function sendProductReadyEmail(to: string, productName: string, productUrl: string): Promise<void> {
   await transporter.sendMail({
     from: process.env.EMAIL_FROM,
     to,
-    subject: `Your tour "${tourName}" is ready`,
-    text: `Your Portal tour "${tourName}" has finished processing. View it here: ${tourUrl}`,
-    html: `<p>Your Portal tour "<strong>${tourName}</strong>" has finished processing.</p><p><a href="${tourUrl}">View your tour</a></p>`,
+    subject: `Your 3D model of "${productName}" is ready`,
+    text: `Your 3D model of "${productName}" has finished processing. View it here: ${productUrl}`,
+    html: `<p>Your 3D model of "<strong>${productName}</strong>" has finished processing.</p><p><a href="${productUrl}">View it</a></p>`,
   });
 }

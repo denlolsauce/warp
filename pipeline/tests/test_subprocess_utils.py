@@ -2,8 +2,8 @@ import sys
 
 import pytest
 
-from portal_pipeline.errors import PipelineError
-from portal_pipeline.subprocess_utils import STDERR_TAIL_LINES, run_command
+from splat_pipeline.errors import PipelineError
+from splat_pipeline.subprocess_utils import STDERR_TAIL_LINES, run_command
 
 
 def test_missing_executable_raises_pipeline_error():

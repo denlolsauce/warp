@@ -4,28 +4,8 @@ import cv2
 import numpy as np
 import pytest
 
-from portal_pipeline.errors import PipelineError
-from portal_pipeline.extract import blur_drop_mask, blur_filter, parse_video_filename
-
-
-@pytest.mark.parametrize(
-    ("filename", "expected_role", "expected_area"),
-    [
-        ("overview_livingroom.mp4", "overview", "livingroom"),
-        ("area_living_room.mp4", "area", "living_room"),
-        ("AREA_Kitchen.mp4", "AREA", "Kitchen"),
-    ],
-)
-def test_parse_video_filename(filename, expected_role, expected_area):
-    role, area_name = parse_video_filename(Path(filename))
-    assert role == expected_role
-    assert area_name == expected_area
-
-
-def test_parse_video_filename_without_underscore_raises():
-    with pytest.raises(PipelineError) as excinfo:
-        parse_video_filename(Path("noareaname.mp4"))
-    assert excinfo.value.stage == "extract"
+from splat_pipeline.errors import PipelineError
+from splat_pipeline.extract import blur_drop_mask, blur_filter, run_extract
 
 
 def _write_frame(path: Path, image: np.ndarray) -> None:
@@ -61,6 +41,12 @@ def test_blur_filter_unreadable_frame_raises(tmp_path: Path):
     assert excinfo.value.stage == "extract:blur_filter"
 
 
+def test_run_extract_missing_video_raises(tmp_path: Path):
+    with pytest.raises(PipelineError) as excinfo:
+        run_extract(tmp_path / "missing.mp4", tmp_path / "frames")
+    assert excinfo.value.stage == "extract"
+
+
 def test_blur_drop_mask_keeps_a_uniformly_sharp_run_intact():
     # The whole point of comparing against neighbours rather than a global
     # percentile: a stretch where every frame is equally good loses nothing.
@@ -70,9 +56,9 @@ def test_blur_drop_mask_keeps_a_uniformly_sharp_run_intact():
 
 def test_blur_drop_mask_keeps_sharp_low_texture_frames():
     # The confound a global percentile gets wrong. Frames 0-29 are a sharp but
-    # bare wall (low Laplacian variance because there is little in view, not
-    # because they are blurred); frames 30-59 are a sharp, heavily textured
-    # region. Nothing here is blurred, so nothing should be dropped.
+    # plain background (low Laplacian variance because there is little in
+    # view, not because they are blurred); frames 30-59 are a sharp, heavily
+    # textured region. Nothing here is blurred, so nothing should be dropped.
     rng = np.random.default_rng(0)
     scores = np.concatenate([rng.normal(40, 6, 30), rng.normal(900, 100, 30)])
 
@@ -80,7 +66,7 @@ def test_blur_drop_mask_keeps_sharp_low_texture_frames():
     assert not drop.any()
 
     # The old global-percentile rule deleted 12 of these frames, and every one
-    # of them came out of the bare-wall run — the footage sfm.py's
+    # of them came out of the plain-background run — the footage sfm.py's
     # verify_reconstruction message says is already the hardest to register.
     would_drop = scores < np.percentile(scores, 20)
     assert would_drop.sum() == 12
@@ -99,7 +85,7 @@ def test_blur_drop_mask_drops_motion_blur_inside_a_textured_run():
 def test_blur_drop_mask_never_drops_more_than_the_cap():
     # Pathological input: every other frame is blurred (judder), so the ratio
     # rule on its own wants to delete half the video. The cap holds it to 40%
-    # rather than leaving the area too sparsely observed to reconstruct.
+    # rather than leaving the capture too sparsely observed to reconstruct.
     scores = np.empty(100)
     scores[0::2] = 1000.0
     scores[1::2] = 100.0

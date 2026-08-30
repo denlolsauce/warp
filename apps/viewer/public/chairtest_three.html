@@ -1,0 +1,19 @@
+<!doctype html><html><head><meta charset="utf-8"><title>three viewers</title>
+<style>body{margin:0;background:#0a0a0c;color:#fff;font:13px sans-serif}
+.demo-surface{width:380px;height:380px;display:inline-block;position:relative}
+canvas{width:380px;height:380px;display:block}
+.demo-loading{position:absolute;top:4px;left:4px}.demo-loading.hidden{display:none}
+.lbl{padding:4px}</style></head><body>
+<div class="lbl">1: vase2</div>
+<div class="demo-surface" data-sog="/vase2.sog" data-radius="2.0">
+  <div class="demo-loading">…</div><canvas width="380" height="380"></canvas></div>
+<div class="lbl">2: vase_unpruned</div>
+<div class="demo-surface" data-sog="/vase_unpruned.sog" data-radius="1.6">
+  <div class="demo-loading">…</div><canvas width="380" height="380"></canvas></div>
+<div class="lbl">3: chair</div>
+<div class="demo-surface" data-sog="/chair_unpruned_upright.sog" data-radius="1.15"
+     data-azimuth="1.5708" data-polar="1.5708" data-floor="auto">
+  <div class="demo-loading">…</div><canvas width="380" height="380"></canvas></div>
+<script src="/playcanvas.min.js"></script>
+<script src="/voxel_app_test.js"></script>
+</body></html>

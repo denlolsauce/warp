@@ -1,22 +1,6 @@
-import json
 from pathlib import Path
 
-from portal_pipeline.storage import upload_tour_outputs, video_storage_key_to_local_name
-
-
-def test_local_name_for_area_video_slugifies_area_name():
-    assert video_storage_key_to_local_name("AREA", "Kitchen") == "area_kitchen.mp4"
-
-
-def test_local_name_for_area_video_replaces_non_alnum_characters():
-    assert video_storage_key_to_local_name("AREA", "Walk-in Closet #2") == "area_walk_in_closet__2.mp4"
-
-
-def test_local_name_for_overview_video_falls_back_to_role():
-    # Video.areaName is NULL for the overview row — extract.py's
-    # <role>_<areaName>.mp4 convention still needs something non-empty
-    # after the underscore.
-    assert video_storage_key_to_local_name("OVERVIEW", None) == "overview_overview.mp4"
+from splat_pipeline.storage import sha256_hex, upload_product_outputs
 
 
 class FakeS3:
@@ -27,41 +11,56 @@ class FakeS3:
         self.uploads.append((local_path, bucket, key, (ExtraArgs or {}).get("ContentType", "")))
 
 
-def test_upload_tour_outputs_rewrites_local_paths_to_public_urls(tmp_path: Path):
-    common = tmp_path / "00_overview.sog"
-    common.write_bytes(b"common")
-    chunk = tmp_path / "chunk_room_a.sog"
-    chunk.write_bytes(b"chunk")
-    area = tmp_path / "01_room_a.sog"
-    area.write_bytes(b"area")
+def test_sha256_hex_matches_a_known_digest(tmp_path: Path):
+    path = tmp_path / "f.bin"
+    path.write_bytes(b"hello world")
+    # sha256("hello world"), verified independently against hashlib directly.
+    assert sha256_hex(path) == "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
 
-    manifest_path = tmp_path / "manifest.json"
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "tourId": "tour-1",
-                "overview": {"common": str(common), "chunks": {"01_room_a": str(chunk)}},
-                "areas": [{"id": "01_room_a", "splatUrl": str(area)}],
-            }
-        )
-    )
+
+def test_sha256_hex_differs_for_different_content(tmp_path: Path):
+    a, b = tmp_path / "a.bin", tmp_path / "b.bin"
+    a.write_bytes(b"one")
+    b.write_bytes(b"two")
+    assert sha256_hex(a) != sha256_hex(b)
+
+
+def test_upload_product_outputs_keys_are_content_hashed(tmp_path: Path):
+    sog_path = tmp_path / "model.sog"
+    sog_path.write_bytes(b"sog-bytes")
+    ply_path = tmp_path / "cleaned.ply"
+    ply_path.write_bytes(b"ply-bytes")
 
     s3 = FakeS3()
-    result_url = upload_tour_outputs(s3, "my-bucket", "https://assets.example.com/", "tour-1", manifest_path)
+    assets = upload_product_outputs(s3, "my-bucket", "https://assets.example.com/", "product-1", sog_path, ply_path)
 
-    assert result_url == "https://assets.example.com/tours/tour-1/manifest.json"
+    sog_hash = sha256_hex(sog_path)
+    ply_hash = sha256_hex(ply_path)
+    assert assets["sog"].key == f"products/product-1/{sog_hash}.sog"
+    assert assets["sog"].url == f"https://assets.example.com/products/product-1/{sog_hash}.sog"
+    assert assets["sog"].content_hash == sog_hash
+    assert assets["sog"].size_bytes == len(b"sog-bytes")
+    assert assets["ply"].key == f"products/product-1/{ply_hash}.ply"
 
     uploaded_keys = {key for _, _, key, _ in s3.uploads}
-    assert uploaded_keys == {
-        "tours/tour-1/00_overview.sog",
-        "tours/tour-1/chunk_room_a.sog",
-        "tours/tour-1/01_room_a.sog",
-        "tours/tour-1/manifest.json",
-    }
+    assert uploaded_keys == {assets["sog"].key, assets["ply"].key}
     assert all(bucket == "my-bucket" for _, bucket, _, _ in s3.uploads)
 
-    manifest_upload = next(local for local, _, key, _ in s3.uploads if key == "tours/tour-1/manifest.json")
-    rewritten = json.loads(Path(manifest_upload).read_text())
-    assert rewritten["overview"]["common"] == "https://assets.example.com/tours/tour-1/00_overview.sog"
-    assert rewritten["overview"]["chunks"]["01_room_a"] == "https://assets.example.com/tours/tour-1/chunk_room_a.sog"
-    assert rewritten["areas"][0]["splatUrl"] == "https://assets.example.com/tours/tour-1/01_room_a.sog"
+
+def test_upload_product_outputs_is_deterministic_for_identical_content(tmp_path: Path):
+    # Same bytes -> same content hash, which is exactly what makes the CDN
+    # URL safe to cache forever (CLAUDE.md's Publish stage). Keys still
+    # differ across products (they're namespaced under products/<id>/), so
+    # this compares the hash itself, not the full key.
+    sog_a, sog_b = tmp_path / "a.sog", tmp_path / "b.sog"
+    sog_a.write_bytes(b"identical")
+    sog_b.write_bytes(b"identical")
+    ply_path = tmp_path / "cleaned.ply"
+    ply_path.write_bytes(b"ply-bytes")
+
+    s3 = FakeS3()
+    assets_a = upload_product_outputs(s3, "bucket", "https://assets.example.com/", "product-1", sog_a, ply_path)
+    assets_b = upload_product_outputs(s3, "bucket", "https://assets.example.com/", "product-2", sog_b, ply_path)
+
+    assert assets_a["sog"].content_hash == assets_b["sog"].content_hash
+    assert assets_a["sog"].key != assets_b["sog"].key  # still namespaced per product

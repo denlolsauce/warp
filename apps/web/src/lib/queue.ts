@@ -15,11 +15,11 @@ if (process.env.NODE_ENV !== "production") {
 // Plain list, not a framework-specific queue (e.g. BullMQ): the consumer is
 // the Python worker (CLAUDE.md), so the wire format needs to stay a simple,
 // language-agnostic JSON payload rather than a Node-only job encoding.
-export const PIPELINE_QUEUE_KEY = "portal:pipeline:jobs";
+export const PIPELINE_QUEUE_KEY = "products:pipeline:jobs";
 
 export interface PipelineJobMessage {
   jobId: string;
-  tourId: string;
+  productId: string;
 }
 
 export async function enqueuePipelineJob(message: PipelineJobMessage): Promise<void> {

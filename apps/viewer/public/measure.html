@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Splat opacity measurement</title>
+    <style>
+      html, body { margin: 0; background: #000; overflow: hidden; }
+      #c { width: 600px; height: 600px; display: block; }
+    </style>
+  </head>
+  <body>
+    <!--
+      Diagnostic harness, not part of the product. Renders a SOG twice --
+      once against pure black, once against pure white -- and derives a
+      per-pixel alpha from how far each pixel shifts between them:
+
+          alpha = 1 - (white_pixel - black_pixel) / 255
+
+      An opaque pixel doesn't move at all between the two backgrounds
+      (alpha 1.0); one that moves the full 255 is completely transparent.
+      This is the only honest way to judge "is the product see-through" --
+      eyeballing a screenshot against a dark background hides exactly the
+      translucency being looked for, because a low-alpha pixel over black
+      still *looks* dark and solid.
+
+      Open with ?sog=/vase.sog then call window.measure() from the console.
+    -->
+    <canvas id="c" width="600" height="600"></canvas>
+    <script src="/playcanvas.min.js"></script>
+    <script>
+      const canvas = document.getElementById("c");
+      const sogUrl = new URLSearchParams(location.search).get("sog");
+      let camEnt = null;
+
+      (async () => {
+        const device = await pc.createGraphicsDevice(canvas, {
+          deviceTypes: [pc.DEVICETYPE_WEBGPU],
+        });
+        device.maxPixelRatio = 1;
+        const app = new pc.Application(canvas, { graphicsDevice: device });
+        // Must match TrainConfig.antialiased, same as the real viewers.
+        app.scene.gsplat.antiAlias = true;
+        // Set the backing store directly rather than via resizeCanvas():
+        // with FILLMODE_NONE that call resolves the size to 0 here, which
+        // leaves createImageBitmap() with nothing to read.
+        app.setCanvasFillMode(pc.FILLMODE_NONE);
+        app.setCanvasResolution(pc.RESOLUTION_FIXED);
+        canvas.width = 600;
+        canvas.height = 600;
+
+        camEnt = new pc.Entity("camera");
+        camEnt.addComponent("camera", { clearColor: new pc.Color(0, 0, 0) });
+        app.root.addChild(camEnt);
+
+        const radius = parseFloat(new URLSearchParams(location.search).get("r") || "2.0");
+        const az = parseFloat(new URLSearchParams(location.search).get("az") || "0.6");
+        const polar = parseFloat(new URLSearchParams(location.search).get("polar") || String(Math.PI / 2.3));
+        camEnt.setPosition(
+          radius * Math.sin(polar) * Math.sin(az),
+          radius * Math.cos(polar),
+          radius * Math.sin(polar) * Math.cos(az)
+        );
+        camEnt.lookAt(0, 0, 0);
+
+        await new Promise((resolve, reject) => {
+          const asset = new pc.Asset("m", "gsplat", { url: sogUrl, filename: "m.sog" });
+          asset.once("load", () => {
+            const e = new pc.Entity("product");
+            e.addComponent("gsplat", { asset });
+            app.root.addChild(e);
+            resolve();
+          });
+          asset.once("error", (err) => reject(new Error(String(err))));
+          app.assets.add(asset);
+          app.assets.load(asset);
+        });
+
+        app.start();
+        window.__ready = true;
+      })();
+
+      window.measure = async function () {
+        const raf = () => new Promise((r) => requestAnimationFrame(() => r()));
+        async function grab(v) {
+          camEnt.camera.clearColor = new pc.Color(v, v, v);
+          await raf(); await raf(); await raf();
+          return await createImageBitmap(canvas);
+        }
+        const bB = await grab(0.0);
+        const bW = await grab(1.0);
+        camEnt.camera.clearColor = new pc.Color(0, 0, 0);
+
+        const w = 400, h = 400;
+        const oc = new OffscreenCanvas(w, h);
+        const ctx = oc.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(bB, 0, 0, w, h);
+        const B = ctx.getImageData(0, 0, w, h).data;
+        ctx.clearRect(0, 0, w, h);
+        ctx.drawImage(bW, 0, 0, w, h);
+        const W = ctx.getImageData(0, 0, w, h).data;
+
+        let n = 0, sumA = 0, opaque = 0;
+        const hist = new Array(10).fill(0);
+        for (let i = 0; i < w * h; i++) {
+          const j = i * 4;
+          // Pixels that are still near-black over a black background are
+          // background themselves, not thin parts of the object -- including
+          // them would understate translucency.
+          if ((B[j] + B[j + 1] + B[j + 2]) / 3 < 6) continue;
+          n++;
+          const d = ((W[j] - B[j]) + (W[j + 1] - B[j + 1]) + (W[j + 2] - B[j + 2])) / 3;
+          const a = Math.max(0, Math.min(1, 1 - d / 255));
+          sumA += a;
+          hist[Math.min(9, Math.floor(a * 10))]++;
+          if (a >= 0.95) opaque++;
+        }
+        return {
+          objectPixels: n,
+          meanAlpha: +(sumA / Math.max(1, n)).toFixed(4),
+          pctFullyOpaque: +((100 * opaque) / Math.max(1, n)).toFixed(1),
+          histogram: hist,
+        };
+      };
+    </script>
+  </body>
+</html>

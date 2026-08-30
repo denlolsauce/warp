@@ -1,19 +1,29 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { sendTourReadyEmail } from "@/lib/email";
+import { sendProductReadyEmail } from "@/lib/email";
 
-// Called by the pipeline worker (pipeline/src/portal_pipeline/worker.py)
+interface AssetPayload {
+  key: string;
+  url: string;
+  sizeBytes: number;
+  contentHash: string;
+}
+
+// Called by the pipeline worker (pipeline/src/splat_pipeline/worker.py)
 // when a job finishes — not the browser, so it authenticates with a shared
-// secret rather than a user session.
+// secret rather than a user session. Owns every success-path side effect
+// (Job/Product terminal status, Asset rows, the ready email) so there's one
+// place responsible for all of them, matching db.py's own comment about why
+// the worker doesn't write these directly.
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const secret = request.headers.get("x-worker-secret");
   if (!secret || secret !== process.env.WORKER_CALLBACK_SECRET) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const { status, manifestUrl, errorMessage } = (await request.json()) as {
+  const { status, assets, errorMessage } = (await request.json()) as {
     status?: "success" | "failure";
-    manifestUrl?: string;
+    assets?: Record<"sog" | "ply", AssetPayload>;
     errorMessage?: string;
   };
   if (status !== "success" && status !== "failure") {
@@ -23,30 +33,43 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const job = await prisma.job.update({
     where: { id: params.id },
     data: {
-      state: status === "success" ? "completed" : "failed",
+      status: status === "success" ? "SUCCEEDED" : "FAILED",
       finishedAt: new Date(),
       errorMessage: errorMessage ?? null,
     },
-    include: { tour: { include: { user: true } } },
+    include: { product: { include: { org: { include: { memberships: { include: { user: true } } } } } } },
   });
 
   if (status === "success") {
-    const tour = await prisma.tour.update({
-      where: { id: job.tourId },
-      data: { status: "PUBLISHED", manifestUrl: manifestUrl ?? null },
+    if (!assets?.sog || !assets?.ply) {
+      return NextResponse.json({ error: "assets.sog and assets.ply are required on success" }, { status: 400 });
+    }
+
+    const product = await prisma.product.update({
+      where: { id: job.productId },
+      data: { status: "READY" },
     });
-    // The tour is already published at this point — a broken SMTP config or
+    await prisma.asset.createMany({
+      data: [
+        { productId: product.id, kind: "SOG", storageKey: assets.sog.key, sizeBytes: assets.sog.sizeBytes, contentHash: assets.sog.contentHash },
+        { productId: product.id, kind: "PLY", storageKey: assets.ply.key, sizeBytes: assets.ply.sizeBytes, contentHash: assets.ply.contentHash },
+      ],
+    });
+
+    // The product is already ready at this point — a broken SMTP config or
     // transient send failure is a notification problem, not a reason to
     // fail this request and have the worker report (and record) the job as
     // failed when it actually succeeded.
     try {
-      const tourUrl = `${process.env.NEXT_PUBLIC_APP_URL}/tours/${tour.id}`;
-      await sendTourReadyEmail(job.tour.user.email, tour.name, tourUrl);
+      const productUrl = `${process.env.NEXT_PUBLIC_APP_URL}/products/${product.id}`;
+      for (const membership of job.product.org.memberships) {
+        await sendProductReadyEmail(membership.user.email, product.name, productUrl);
+      }
     } catch (error) {
-      console.error("failed to send tour-ready email", error);
+      console.error("failed to send product-ready email", error);
     }
   } else {
-    await prisma.tour.update({ where: { id: job.tourId }, data: { status: "FAILED" } });
+    await prisma.product.update({ where: { id: job.productId }, data: { status: "FAILED" } });
   }
 
   return NextResponse.json({ ok: true });

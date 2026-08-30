@@ -6,20 +6,59 @@ datasource db {
   provider = "postgresql"
 }
 
-enum TourStatus {
+enum MembershipRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum PlanTier {
+  FREE
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+enum ProductStatus {
   DRAFT
   UPLOADED
-  EXTRACTING
-  SFM
-  TRAINING
-  COMPRESSING
-  PUBLISHED
+  PROCESSING
+  READY
   FAILED
 }
 
-enum VideoRole {
-  OVERVIEW
-  AREA
+enum JobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+// Fixed pipeline order (CLAUDE.md, "Pipeline stages"). A JobStageRun is
+// created per stage in this order, so resuming a crashed job means finding
+// the first stage in this sequence that doesn't have a SUCCEEDED run yet.
+enum JobStage {
+  INGEST
+  FRAME_EXTRACTION
+  POSE_ESTIMATION
+  TRAINING
+  CLEANUP
+  COMPRESSION
+  PUBLISH
+}
+
+enum StageStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum AssetKind {
+  PLY
+  SOG
+  POSTER
+  TURNTABLE_VIDEO
 }
 
 model User {
@@ -29,11 +68,10 @@ model User {
   name          String?
   image         String?
   createdAt     DateTime  @default(now())
-  credits       Int       @default(40)
 
-  accounts Account[]
-  sessions Session[]
-  tours    Tour[]
+  accounts    Account[]
+  sessions    Session[]
+  memberships Membership[]
 }
 
 // Auth.js (@auth/prisma-adapter) standard schema — required table shapes,
@@ -74,46 +112,141 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
-model Tour {
-  id          String     @id @default(cuid())
-  userId      String
-  name        String
-  status      TourStatus @default(DRAFT)
-  manifestUrl String?
-  createdAt   DateTime   @default(now())
+// A merchant account. Membership is many-to-many with User (not a plain
+// orgId on User) so one person can belong to more than one org and an org
+// can have more than one teammate — CLAUDE.md "merchants have teams".
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  plan      PlanTier @default(FREE)
+  createdAt DateTime @default(now())
 
-  user   User    @relation(fields: [userId], references: [id])
-  videos Video[]
-  jobs   Job[]
-
-  @@index([userId])
+  memberships Membership[]
+  products    Product[]
 }
 
-model Video {
-  id          String    @id @default(cuid())
-  tourId      String
-  role        VideoRole
-  areaName    String?
-  floor       String?
+model Membership {
+  id     String         @id @default(cuid())
+  userId String
+  orgId  String
+  role   MembershipRole @default(MEMBER)
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+  @@index([orgId])
+}
+
+model Product {
+  id        String        @id @default(cuid())
+  orgId     String
+  name      String
+  status    ProductStatus @default(DRAFT)
+  createdAt DateTime      @default(now())
+
+  org    Organization  @relation(fields: [orgId], references: [id])
+  video  ProductVideo?
+  jobs   Job[]
+  assets Asset[]
+
+  @@index([orgId])
+}
+
+// One video per product for v1 (CLAUDE.md: "uploads a 2-4 minute video of a
+// single product") — @@unique enforces the 1:1 instead of modelling a list
+// that's never allowed to hold more than one row.
+model ProductVideo {
+  id          String   @id @default(cuid())
+  productId   String   @unique
   storageKey  String
   durationSec Float?
-  uploadedAt  DateTime  @default(now())
+  uploadedAt  DateTime @default(now())
 
-  tour Tour @relation(fields: [tourId], references: [id])
-
-  @@index([tourId])
+  product Product @relation(fields: [productId], references: [id])
 }
 
+// One row per processing attempt (initial upload, or a merchant-triggered
+// "regenerate"). Per-stage state lives on JobStageRun, not here, so a crash
+// mid-job can resume from the last successful stage instead of restarting.
 model Job {
   id           String    @id @default(cuid())
-  tourId       String
-  stage        String
-  state        String
+  productId    String
+  status       JobStatus @default(QUEUED)
+  currentStage JobStage?
   startedAt    DateTime?
   finishedAt   DateTime?
   errorMessage String?
+  gpuSeconds   Float?
+  createdAt    DateTime  @default(now())
 
-  tour Tour @relation(fields: [tourId], references: [id])
+  product Product       @relation(fields: [productId], references: [id])
+  stages  JobStageRun[]
 
-  @@index([tourId])
+  @@index([productId])
+}
+
+// Append-only: a retried stage gets a new row with attempt + 1 rather than
+// reusing the failed one, so the run history is never overwritten and the
+// resume point is always "highest-attempt row per stage that is SUCCEEDED".
+model JobStageRun {
+  id           String      @id @default(cuid())
+  jobId        String
+  stage        JobStage
+  attempt      Int         @default(1)
+  status       StageStatus @default(PENDING)
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  errorMessage String?
+  // Structured, stage-specific numbers for the timing/cost log CLAUDE.md's
+  // non-negotiables require — e.g. { registrationRate: 0.83 } for
+  // POSE_ESTIMATION, { gaussianCount: 512000 } for TRAINING. Deliberately
+  // untyped: every stage reports different numbers, and a rigid column set
+  // would force either nulls everywhere or a migration per stage tweak.
+  metrics      Json?
+  // Storage key for this stage's persisted output (extracted frames
+  // archive, sparse reconstruction, checkpoint, ...) — what makes the stage
+  // resumable without recomputing it.
+  artifactKey  String?
+
+  job Job @relation(fields: [jobId], references: [id])
+
+  @@unique([jobId, stage, attempt])
+  @@index([jobId])
+}
+
+model Asset {
+  id          String    @id @default(cuid())
+  productId   String
+  kind        AssetKind
+  storageKey  String
+  sizeBytes   Int?
+  // For the immutable content-hashed CDN URLs the Publish stage writes to.
+  contentHash String?
+  createdAt   DateTime  @default(now())
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([productId])
+}
+
+/// A marketing-site waitlist request. Deliberately unrelated to User: these
+/// people have no account yet, and most never will — tying them to the auth
+/// tables would mean creating login-capable rows for anyone who fills in a
+/// public form.
+model WaitlistSignup {
+  id        String   @id @default(cuid())
+  /// Stored lower-cased so the unique constraint actually dedupes; a repeat
+  /// submission updates the existing row rather than creating a second one.
+  email     String   @unique
+  company   String?
+  /// Objects they expect to capture in month one — one of the form's buckets,
+  /// kept as free text so adding a bucket doesn't need a migration.
+  volume    String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt])
 }

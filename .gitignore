@@ -42,3 +42,7 @@ apps/web/prisma/dev.db
 
 # raw capture footage, not source
 /WhatsApp Video*.mp4
+*.mp4
+
+.vercel
+.env*

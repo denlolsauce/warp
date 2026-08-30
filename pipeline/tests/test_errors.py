@@ -1,4 +1,4 @@
-from portal_pipeline.errors import PipelineError
+from splat_pipeline.errors import PipelineError
 
 
 def test_carries_stage_and_message():

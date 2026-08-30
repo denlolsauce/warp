@@ -1,0 +1,26 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "//": "prisma generate is explicit because there is no postinstall script and pnpm would otherwise skip it, leaving @prisma/client uninitialised at build. Schema changes are applied separately with `prisma migrate deploy` — keeping it out of the build means a deploy does not require a reachable database.",
+  "buildCommand": "prisma generate && next build",
+  "framework": "nextjs",
+  "headers": [
+    {
+      "source": "/:file(.*).sog",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/playcanvas.min.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ]
+}
