@@ -10,7 +10,7 @@ from .compress import run_compress
 from .errors import PipelineError
 from .extract import run_extract
 from .ingest import run_ingest
-from .sfm import run_sfm
+from .pose import GlomapPoseBackend, PoseBackend, VggtConfig, VggtPoseBackend
 from .train import TrainConfig, run_train
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sfm_parser = subparsers.add_parser(
-        "sfm", help="Run COLMAP feature extraction/matching and GLOMAP mapping"
+        "sfm", help="Estimate camera poses (GLOMAP by default, or VGGT feed-forward)"
     )
     sfm_parser.add_argument(
         "--workdir",
@@ -46,10 +46,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Job working directory; reads <workdir>/frames, writes db.db and sparse/",
     )
     sfm_parser.add_argument(
+        "--backend",
+        choices=["glomap", "vggt"],
+        default="glomap",
+        help="Pose backend. glomap (default) is COLMAP+GLOMAP SfM; vggt is the "
+        "feed-forward alternative — much faster, unproven on real captures",
+    )
+    sfm_parser.add_argument(
         "--vocab-tree",
         type=Path,
-        required=True,
-        help="Path to a COLMAP vocabulary tree file",
+        default=None,
+        help="Path to a COLMAP vocabulary tree file (required by the glomap backend)",
+    )
+    sfm_parser.add_argument(
+        "--vggt-max-frames",
+        type=int,
+        default=None,
+        help="Override: how many evenly-spaced frames the vggt backend poses",
+    )
+    sfm_parser.add_argument(
+        "--vggt-conf-threshold",
+        type=float,
+        default=None,
+        help="Override: vggt depth-confidence threshold for keeping a point",
     )
 
     train_parser = subparsers.add_parser(
@@ -106,6 +125,22 @@ def _train_config_override(args: argparse.Namespace) -> TrainConfig | None:
     )
 
 
+def _pose_backend(args: argparse.Namespace) -> PoseBackend:
+    if args.backend == "vggt":
+        base = VggtConfig()
+        return VggtPoseBackend(
+            VggtConfig(
+                max_frames=args.vggt_max_frames if args.vggt_max_frames is not None else base.max_frames,
+                conf_threshold=(
+                    args.vggt_conf_threshold if args.vggt_conf_threshold is not None else base.conf_threshold
+                ),
+            )
+        )
+    if args.vocab_tree is None:
+        raise PipelineError("sfm", "--vocab-tree is required by the glomap backend")
+    return GlomapPoseBackend(args.vocab_tree)
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = build_parser().parse_args(argv)
@@ -116,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "extract":
             run_extract(args.video_path, args.workdir / "frames")
         elif args.command == "sfm":
-            run_sfm(args.workdir, args.vocab_tree)
+            _pose_backend(args).estimate(args.workdir)
         elif args.command == "train":
             run_train(args.workdir, _train_config_override(args))
         elif args.command == "cleanup":
