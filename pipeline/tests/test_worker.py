@@ -1,5 +1,11 @@
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+
+from splat_pipeline.pose import GlomapPoseBackend, VggtPoseBackend
 from splat_pipeline.storage import UploadedAsset
-from splat_pipeline.worker import WorkerConfig, call_completion_callback
+from splat_pipeline.worker import WorkerConfig, call_completion_callback, make_pose_backend
 
 
 def _config() -> WorkerConfig:
@@ -13,6 +19,7 @@ def _config() -> WorkerConfig:
         r2_public_base_url="https://assets.example.com",
         app_url="https://app.example.com",
         callback_secret="s3cr3t",
+        pose_backend="glomap",
         vocab_tree="vocab.bin",
         sam2_checkpoint=None,
     )
@@ -58,3 +65,22 @@ def test_call_completion_callback_failure_posts_truncated_error_message(monkeypa
     assert captured["json"]["status"] == "failure"
     assert len(captured["json"]["errorMessage"]) == 2000
     assert "assets" not in captured["json"]
+
+
+def test_make_pose_backend_defaults_to_glomap_with_the_configured_vocab_tree():
+    backend = make_pose_backend(_config())
+    assert isinstance(backend, GlomapPoseBackend)
+    assert backend.vocab_tree == Path("vocab.bin")
+
+
+def test_make_pose_backend_selects_vggt():
+    backend = make_pose_backend(replace(_config(), pose_backend="vggt"))
+    assert isinstance(backend, VggtPoseBackend)
+
+
+def test_make_pose_backend_rejects_an_unknown_backend():
+    """A typo'd SPLAT_POSE_BACKEND must fail at startup rather than silently
+    falling back to a backend the operator didn't ask for."""
+    with pytest.raises(RuntimeError) as excinfo:
+        make_pose_backend(replace(_config(), pose_backend="nerf"))
+    assert "nerf" in str(excinfo.value)

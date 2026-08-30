@@ -89,6 +89,11 @@ splat-pipeline extract my-product.mp4 --workdir work/my-product
 # 2. COLMAP+GLOMAP reconstruction. Slowest CPU-bound stage.
 splat-pipeline sfm --workdir work/my-product --vocab-tree /path/to/vocab_tree.bin
 
+# 2b. (alternative) Feed-forward poses with VGGT. Seconds of GPU time instead
+#     of tens of CPU-minutes — see "Pose backends" below before relying on it.
+export SPLAT_VGGT_PYTHON=/path/to/vggt-venv/python.exe
+splat-pipeline sfm --workdir work/my-product --backend vggt
+
 # 3. Train with gsplat MCMC. GPU-bound.
 export SPLAT_GSPLAT_PYTHON=/path/to/gsplat-venv/python.exe
 splat-pipeline train --workdir work/my-product
@@ -107,6 +112,54 @@ can retry from any point without redoing earlier work. The Redis worker
 (`JobStageRun`) so a crashed job resumes from the first stage that hasn't
 succeeded yet, rather than needing a manual re-run — see `db.py`'s
 `resume_stage()`.
+
+### Pose backends
+
+The `sfm` stage sits behind a `PoseBackend` interface (`pose.py`) with two
+implementations. Both write the same artifact — a COLMAP sparse model at
+`<workdir>/sparse/0` — so everything downstream is unaffected by which one
+ran.
+
+| | `glomap` (default) | `vggt` |
+|---|---|---|
+| Method | COLMAP SIFT + sequential/vocab-tree matching, GLOMAP mapper | VGGT-1B feed-forward transformer, no matching |
+| Hardware | CPU-bound (GPU only for SIFT extraction) | GPU-bound, needs CUDA |
+| Needs a vocab tree | yes | no |
+| Frames | all of them | an evenly-spaced subset (`MAX_VGGT_FRAMES`, default 96) — VGGT attends across every frame at once, so VRAM scales with frame count |
+| Quality gate | registration rate ≥ 80% | depth confidence, see below |
+| Status | proven end to end on real captures | **unverified** |
+
+VGGT is the "feed-forward estimator (VGGT / MASt3R) swapped in as a fallback
+when SfM fails to register" that CLAUDE.md's Pose estimation stage calls for.
+It is the largest single lever on turnaround time — matching, not training,
+is what makes a job take an hour — but it is opt-in until it has been A/B'd
+against GLOMAP on real product video, on both output quality and on
+`cleanup.py`'s downstream assumptions (its RANSAC plane fit and up-axis
+estimate both depend on the poses being metrically sane).
+
+**The quality gate is different, and this is the important part.** SfM
+*tries* to register each frame and reports how many it managed, so a bad
+capture shows up as a low registration rate. A feed-forward estimator emits
+a pose for every frame it is handed, unconditionally — registration rate is
+structurally 100% and tells you nothing. VGGT's per-pixel depth confidence
+is the only signal available, so `verify_vggt_metrics()` gates on the
+fraction of depth samples above VGGT's own confidence threshold
+(`MIN_CONFIDENT_POINT_FRACTION`, default 50%). That threshold is
+provisional: unlike the 80% registration rate, it has not been calibrated
+against a known-good and a known-bad capture yet. Do that before trusting
+this backend to fail loudly the way the GLOMAP path does.
+
+**Environment.** VGGT needs its own venv with torch+CUDA, for the same
+reason the gsplat trainer does — point `SPLAT_VGGT_PYTHON` at it. Install
+`facebookresearch/vggt` into it (`pip install -r requirements.txt` from its
+checkout, plus this package so `python -m splat_pipeline.vggt_runner`
+resolves). The 1B checkpoint downloads from HuggingFace on first run and is
+cached; a cold GPU box pays that download once. `vggt_runner.py` runs
+entirely inside that venv and imports nothing from `splat_pipeline` — the
+testable logic lives in `pose.py` on the near side of the subprocess
+boundary.
+
+For the worker, set `SPLAT_POSE_BACKEND=vggt` (defaults to `glomap`).
 
 ## 4. Known gotchas
 

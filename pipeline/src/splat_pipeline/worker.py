@@ -25,7 +25,7 @@ from .db import (
 )
 from .extract import run_extract
 from .ingest import run_ingest
-from .sfm import run_sfm
+from .pose import GlomapPoseBackend, PoseBackend, VggtPoseBackend
 from .storage import UploadedAsset, download_video, make_s3_client, upload_product_outputs
 from .train import run_train
 
@@ -60,6 +60,15 @@ DEFAULT_VOCAB_TREE = r"C:\tools\vocab_tree_local_faiss_fast.bin"
 # Confirmed the hard way: a real sfm run fails at the matching stage with
 # colmap-extract on PATH ahead of this one.
 DEFAULT_EXTRA_PATH_DIRS = r"C:\tools\colmap-3126-extract\bin;C:\tools\glomap-extract\bin"
+# VGGT runs out-of-process against its own venv, like the gsplat trainer —
+# see pose.py's VggtPoseBackend. Only consulted when SPLAT_POSE_BACKEND
+# selects it, so a box that only ever runs the default GLOMAP path needs
+# nothing installed here.
+DEFAULT_VGGT_PYTHON = r"C:\tools\vggt\.venv\Scripts\python.exe"
+# GLOMAP stays the default until the feed-forward path has been measured
+# against it on real product captures (CLAUDE.md's Pose estimation stage
+# names VGGT/MASt3R as the fallback for captures SfM can't register).
+DEFAULT_POSE_BACKEND = "glomap"
 
 
 @dataclass(frozen=True)
@@ -73,6 +82,7 @@ class WorkerConfig:
     r2_public_base_url: str
     app_url: str
     callback_secret: str
+    pose_backend: str
     vocab_tree: str
     sam2_checkpoint: str | None
 
@@ -93,6 +103,7 @@ def configure_tool_paths() -> None:
     extra_dirs = os.environ.get("SPLAT_EXTRA_PATH_DIRS", DEFAULT_EXTRA_PATH_DIRS)
     os.environ["PATH"] = extra_dirs + os.pathsep + os.environ.get("PATH", "")
     os.environ.setdefault("SPLAT_GSPLAT_PYTHON", DEFAULT_GSPLAT_PYTHON)
+    os.environ.setdefault("SPLAT_VGGT_PYTHON", DEFAULT_VGGT_PYTHON)
 
 
 def _required_env(name: str) -> str:
@@ -113,6 +124,7 @@ def load_config() -> WorkerConfig:
         r2_public_base_url=_required_env("R2_PUBLIC_BASE_URL"),
         app_url=_required_env("NEXT_PUBLIC_APP_URL"),
         callback_secret=_required_env("WORKER_CALLBACK_SECRET"),
+        pose_backend=os.environ.get("SPLAT_POSE_BACKEND", DEFAULT_POSE_BACKEND),
         vocab_tree=os.environ.get("SPLAT_VOCAB_TREE", DEFAULT_VOCAB_TREE),
         # Optional, unlike the rest: cleanup.run_cleanup() runs without
         # background-segmentation pruning (logging a warning) rather than
@@ -122,6 +134,17 @@ def load_config() -> WorkerConfig:
         # pipeline running.
         sam2_checkpoint=os.environ.get("SAM2_CHECKPOINT"),
     )
+
+
+def make_pose_backend(config: WorkerConfig) -> PoseBackend:
+    if config.pose_backend == "vggt":
+        logger.info("pose backend: vggt (feed-forward)")
+        return VggtPoseBackend()
+    if config.pose_backend != "glomap":
+        raise RuntimeError(
+            f"unknown SPLAT_POSE_BACKEND {config.pose_backend!r} (expected 'glomap' or 'vggt')"
+        )
+    return GlomapPoseBackend(Path(config.vocab_tree))
 
 
 def make_workdir(job_id: str) -> Path:
@@ -193,10 +216,12 @@ def process_job(job_id: str, product_id: str, config: WorkerConfig) -> None:
             else None
         )
 
+        pose_backend = make_pose_backend(config)
+
         stage_functions = {
             "INGEST": lambda: run_ingest(video_path),
             "FRAME_EXTRACTION": lambda: run_extract(video_path, workdir / "frames"),
-            "POSE_ESTIMATION": lambda: run_sfm(workdir, Path(config.vocab_tree)),
+            "POSE_ESTIMATION": lambda: pose_backend.estimate(workdir),
             "TRAINING": lambda: run_train(workdir),
             "CLEANUP": lambda: run_cleanup(workdir, segmentation_backend),
             "COMPRESSION": lambda: run_compress(workdir),
