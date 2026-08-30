@@ -5,6 +5,10 @@ import { prisma } from "./prisma";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
+  // Callback/redirect URLs are derived from the incoming request's forwarded
+  // host. Without this, anything served through a proxy (preview tunnels,
+  // any load balancer) sends the user to localhost instead of the real origin.
+  trustHost: true,
   providers: [
     Nodemailer({
       server: {
@@ -21,6 +25,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: "database" },
   pages: {
     signIn: "/signin",
+    error: "/signin",
   },
   callbacks: {
     // Database session strategy hands the callback {session, user} — but
