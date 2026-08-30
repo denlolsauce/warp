@@ -46,3 +46,10 @@ apps/web/prisma/dev.db
 
 .vercel
 .env*
+
+# hoplite sandbox local state
+.hoplite/attachments/
+.hoplite/archive/
+
+# local screenshots
+shots/

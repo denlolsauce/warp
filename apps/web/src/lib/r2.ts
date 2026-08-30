@@ -2,6 +2,7 @@ import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
+  GetObjectCommand,
   S3Client,
   UploadPartCommand,
 } from "@aws-sdk/client-s3";
@@ -70,4 +71,14 @@ export async function completeMultipartUpload(
 
 export async function abortMultipartUpload(key: string, uploadId: string): Promise<void> {
   await s3.send(new AbortMultipartUploadCommand({ Bucket: R2_BUCKET, Key: key, UploadId: uploadId }));
+}
+
+/** Short-lived download URL for a stored asset (raw PLY / SOG downloads). */
+export async function getDownloadUrl(key: string, filename?: string): Promise<string> {
+  const command = new GetObjectCommand({
+    Bucket: R2_BUCKET,
+    Key: key,
+    ...(filename ? { ResponseContentDisposition: `attachment; filename="${filename}"` } : {}),
+  });
+  return getSignedUrl(s3, command, { expiresIn: 10 * 60 });
 }
