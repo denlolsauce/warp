@@ -1,5 +1,4 @@
 import { randomUUID } from "crypto";
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -40,19 +39,29 @@ export async function POST(request: Request): Promise<Response> {
     new URL(request.url).protocol.replace(":", "");
   const secure = proto === "https";
 
-  const store = await cookies();
-  store.set(secure ? "__Secure-authjs.session-token" : "authjs.session-token", sessionToken, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure,
-    path: "/",
-    expires,
-  });
+  const cookieName = secure ? "__Secure-authjs.session-token" : "authjs.session-token";
+  const attrs = [
+    `${cookieName}=${sessionToken}`,
+    "Path=/",
+    `Expires=${expires.toUTCString()}`,
+    "HttpOnly",
+  ];
+  if (secure) {
+    // The preview panel embeds the app in a cross-site iframe, so the cookie is
+    // third-party: it needs SameSite=None to be sent back at all, and
+    // Partitioned (CHIPS) because Chrome otherwise blocks it outright there.
+    attrs.push("Secure", "SameSite=None", "Partitioned");
+  } else {
+    attrs.push("SameSite=Lax");
+  }
 
   const callbackUrl = String(form.get("callbackUrl") ?? "/studio");
   // Relative Location keeps the browser on the same host it posted from —
   // an absolute URL built from request.url can flip 127.0.0.1 to localhost
   // and the cookie just set would not be sent on the redirected request.
   const path = callbackUrl.startsWith("/") ? callbackUrl : "/studio";
-  return new NextResponse(null, { status: 303, headers: { Location: path } });
+  return new NextResponse(null, {
+    status: 303,
+    headers: { Location: path, "Set-Cookie": attrs.join("; ") },
+  });
 }
