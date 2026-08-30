@@ -11,7 +11,7 @@
 		},
 		"run": {
 			"enabled": true,
-			"command": "pnpm -C apps/web dev"
+			"command": "cd apps/web && exec ../../node_modules/.bin/next dev"
 		},
 		"archive": {
 			"enabled": true,
