@@ -23,10 +23,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   session: { strategy: "database" },
-  pages: {
-    signIn: "/signin",
-    error: "/signin",
-  },
   callbacks: {
     // Database session strategy hands the callback {session, user} — but
     // Auth.js doesn't copy user.id onto session.user by default, and this

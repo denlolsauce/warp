@@ -1,4 +1,3 @@
-import { redirect } from "next/navigation";
 import type { Organization, User } from "@prisma/client";
 import { auth } from "./auth";
 import { prisma } from "./prisma";
@@ -25,29 +24,48 @@ function slugify(input: string): string {
   return base || "workspace";
 }
 
+const DEMO_EMAIL = "test@portal.dev";
+
 /**
- * Resolve the signed-in user and their organization for a studio page,
- * redirecting to sign-in when there is no session. A first-time user gets a
- * personal workspace created on the spot — the studio is unusable without an
- * org to own products, and forcing an onboarding form before showing anything
- * would be worse than naming one after them.
+ * Sign-in is parked for now: with no session, the studio runs as the seeded
+ * demo user instead of redirecting. Restore a redirect to a sign-in page here
+ * when auth comes back.
+ */
+async function demoUser() {
+  return prisma.user.upsert({
+    where: { email: DEMO_EMAIL },
+    update: {},
+    create: { email: DEMO_EMAIL, name: "Test Merchant", emailVerified: new Date() },
+  });
+}
+
+/** Session user when one exists, otherwise the demo user (auth is parked). */
+export async function resolveStudioUser(): Promise<StudioContext["user"]> {
+  const session = await auth();
+  return session?.user?.id
+    ? (session.user as StudioContext["user"])
+    : ((await demoUser()) as StudioContext["user"]);
+}
+
+/**
+ * Resolve the current user and their organization for a studio page. A
+ * first-time user gets a personal workspace created on the spot — the studio
+ * is unusable without an org to own products, and forcing an onboarding form
+ * before showing anything would be worse than naming one after them.
  */
 export async function requireStudioContext(): Promise<StudioContext> {
-  const session = await auth();
-  if (!session?.user?.id) {
-    redirect("/signin?callbackUrl=/studio");
-  }
+  const user = await resolveStudioUser();
 
   const membership = await prisma.membership.findFirst({
-    where: { userId: session.user.id },
+    where: { userId: user.id },
     include: { org: true },
     orderBy: { id: "asc" },
   });
   if (membership) {
-    return { user: session.user as StudioContext["user"], org: membership.org };
+    return { user, org: membership.org };
   }
 
-  const label = session.user.name ?? session.user.email?.split("@")[0] ?? "workspace";
+  const label = user.name ?? user.email?.split("@")[0] ?? "workspace";
   const base = slugify(label);
   // Slug is unique — suffix with a random tail on collision instead of failing.
   const slug = (await prisma.organization.findUnique({ where: { slug: base } }))
@@ -58,10 +76,10 @@ export async function requireStudioContext(): Promise<StudioContext> {
     data: {
       name: label,
       slug,
-      memberships: { create: { userId: session.user.id, role: "OWNER" } },
+      memberships: { create: { userId: user.id, role: "OWNER" } },
     },
   });
-  return { user: session.user as StudioContext["user"], org };
+  return { user, org };
 }
 
 /** Jobs started by this org since the first of the current month (UTC). */

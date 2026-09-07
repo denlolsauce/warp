@@ -11,7 +11,7 @@
 		},
 		"run": {
 			"enabled": true,
-			"command": "cd apps/web && exec ../../node_modules/.bin/next dev"
+			"command": "cd apps/web && NODE_OPTIONS=--max-old-space-size=1024 exec ../../node_modules/.bin/next dev"
 		},
 		"archive": {
 			"enabled": true,

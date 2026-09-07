@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { Organization } from "@prisma/client";
-import { auth } from "./auth";
+import { resolveStudioUser } from "./studio";
 import { prisma } from "./prisma";
 
 export { jobsUsedThisPeriod, PLAN_JOB_LIMITS } from "./studio";
@@ -11,12 +11,9 @@ export { jobsUsedThisPeriod, PLAN_JOB_LIMITS } from "./studio";
  * workspace — API calls only happen from studio pages, which already did.
  */
 export async function requireApiOrg(): Promise<{ org: Organization } | { error: NextResponse }> {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
-  }
+  const user = await resolveStudioUser();
   const membership = await prisma.membership.findFirst({
-    where: { userId: session.user.id },
+    where: { userId: user.id },
     include: { org: true },
     orderBy: { id: "asc" },
   });

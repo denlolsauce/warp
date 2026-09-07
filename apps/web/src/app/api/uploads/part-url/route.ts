@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireApiOrg } from "@/lib/studioApi";
 import { getPartUploadUrl } from "@/lib/r2";
 
 export async function POST(request: Request) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  const access = await requireApiOrg();
+  if ("error" in access) return access.error;
 
   const { key, uploadId, partNumber } = (await request.json()) as {
     key?: string;
