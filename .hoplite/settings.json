@@ -1,0 +1,9 @@
+{
+  "scripts": {
+    "setup": "pnpm install --frozen-lockfile && pnpm --filter @portal/schema run build && (cd apps/web && DATABASE_URL=\"${DATABASE_URL:-postgresql://localhost:5432/portal}\" pnpm exec prisma generate) && (cd pipeline && uv sync)",
+    "run": "cd apps/web && pnpm exec next dev --port 3000 --hostname 0.0.0.0"
+  },
+  "ports": {
+    "default": 3000
+  }
+}
