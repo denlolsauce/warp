@@ -1,12 +1,8 @@
 import { z } from "zod";
 
-export const Vec3Schema = z.tuple([z.number(), z.number(), z.number()]);
-export type Vec3 = z.infer<typeof Vec3Schema>;
+import { Vec2Schema, Vec3Schema } from "./vectors";
 
-// [x, z] — the floor plane, dropping the up axis. Used for the floorplan
-// image's world-space bounds.
-export const Vec2Schema = z.tuple([z.number(), z.number()]);
-export type Vec2 = z.infer<typeof Vec2Schema>;
+export * from "./vectors";
 
 export const ThresholdSchema = z.object({
   pos: Vec3Schema,
@@ -58,3 +54,5 @@ export const SceneManifestSchema = z.object({
   nav: NavSchema,
 });
 export type SceneManifest = z.infer<typeof SceneManifestSchema>;
+
+export * from "./changeReport";

@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "generatedAt": "2026-09-07T14:53:22.847432+00:00",
+  "baseline": "2026-03-14",
+  "repeat": "2026-04-25",
+  "method": {
+    "changeDetection": "M3C2 (Lague, Brodu & Leroux 2013)",
+    "georeferencing": "Umeyama similarity fit to ground control points",
+    "fineAlignment": "trimmed rigid ICP on the unchanged surface",
+    "pointSpacingM": 0.0726,
+    "normalRadiusM": 1.4524,
+    "cylinderRadiusM": 0.4357,
+    "cylinderHalfLengthM": 2.9048,
+    "upAxis": [
+      0.0,
+      0.0,
+      1.0
+    ]
+  },
+  "precision": {
+    "baselineControlRmseM": 0.0,
+    "repeatControlRmseM": 0.0,
+    "registrationRmseM": 0.0,
+    "registrationConverged": true,
+    "registrationInlierCount": 13860,
+    "scaleMPerUnit": {
+      "baseline": 2.5,
+      "repeat": 2.5
+    }
+  },
+  "change": {
+    "corePoints": 8324,
+    "measuredFraction": 1.0,
+    "significantFraction": 0.1205,
+    "medianLevelOfDetectionM": 0.0047,
+    "maxLossM": 0.3614,
+    "maxGainM": 0.2271,
+    "registrationErrorM": 0.0,
+    "confidenceLevel": 0.95
+  },
+  "siteVolume": {
+    "netM3": -8.836,
+    "gainM3": 3.645,
+    "lossM3": 12.481,
+    "uncertaintyM3": 0.149,
+    "surfaceAreaM2": 71.318,
+    "cellSizeM": 0.8714,
+    "cellCount": 84,
+    "excludedSteepAreaM2": 0.0
+  },
+  "findings": [
+    {
+      "clusterId": 0,
+      "direction": "loss",
+      "pointCount": 687,
+      "centroid": [
+        9.869,
+        10.012,
+        4.935
+      ],
+      "bbox": [
+        [
+          6.541,
+          6.805,
+          3.268
+        ],
+        [
+          13.035,
+          13.197,
+          6.517
+        ]
+      ],
+      "peakDistanceM": -0.3614,
+      "meanDistanceM": -0.3079,
+      "peakLevelOfDetectionM": 0.0052,
+      "peakConfidenceRatio": 69.39,
+      "volume": {
+        "netM3": -12.481,
+        "gainM3": 0.0,
+        "lossM3": 12.481,
+        "uncertaintyM3": 0.134,
+        "surfaceAreaM2": 46.697,
+        "cellSizeM": 0.8714,
+        "cellCount": 55,
+        "excludedSteepAreaM2": 0.0
+      }
+    },
+    {
+      "clusterId": 1,
+      "direction": "gain",
+      "pointCount": 316,
+      "centroid": [
+        4.076,
+        14.962,
+        2.037
+      ],
+      "bbox": [
+        [
+          1.941,
+          12.865,
+          0.983
+        ],
+        [
+          6.239,
+          17.172,
+          3.108
+        ]
+      ],
+      "peakDistanceM": 0.2271,
+      "meanDistanceM": 0.1782,
+      "peakLevelOfDetectionM": 0.0056,
+      "peakConfidenceRatio": 40.76,
+      "volume": {
+        "netM3": 3.645,
+        "gainM3": 3.645,
+        "lossM3": 0.0,
+        "uncertaintyM3": 0.066,
+        "surfaceAreaM2": 24.621,
+        "cellSizeM": 0.8714,
+        "cellCount": 29,
+        "excludedSteepAreaM2": 0.0
+      }
+    }
+  ]
+}

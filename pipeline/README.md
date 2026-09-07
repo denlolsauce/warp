@@ -250,3 +250,99 @@ than a defect.
 it into `apps/viewer/public/` and point the viewer at it directly — there's
 no per-product manifest yet (that's `packages/schema`'s still-pending
 product-manifest schema; see CLAUDE.md's Repo layout section).
+
+## 6. Geotechnical monitoring: comparing two captures
+
+`splat_pipeline.geo` is a second, independent path over the same
+reconstruction machinery. Where the stages above answer "what does this look
+like", these answer the question a geotechnical engineer is paid to answer:
+*what moved since last time, by how much, and is that number bigger than my
+measurement error*.
+
+```bash
+# Both captures already run through `cleanup`, each in its own workdir.
+splat-pipeline monitor \
+  work/slope-march/cleaned.ply \
+  work/slope-april/cleaned.ply \
+  --baseline-gcps work/slope-march/gcps.json \
+  --repeat-gcps   work/slope-april/gcps.json \
+  --workdir work/slope-survey
+# -> work/slope-survey/survey/change-report.json
+```
+
+### Ground control points are not optional
+
+SfM recovers geometry only up to an arbitrary 7-DoF similarity. Until GCPs
+are tied in there is no such thing as a distance in metres, so `monitor`
+requires them for both captures rather than defaulting them — a report full
+of confident millimetres derived from reconstruction units is worse than no
+report.
+
+```json
+{"points": [
+  {"label": "GCP1", "local": [0.13, -0.44, 0.02], "world": [412300.11, 5918400.52, 61.20]}
+]}
+```
+
+`local` is in reconstruction units (picked in the viewer, or from a coded
+target). `world` is metres in a **projected** CRS with a vertical datum —
+never lat/long degrees, since degrees are not a length and everything
+downstream subtracts these. Three non-collinear points is the minimum; four
+or more spread across the site gives a residual worth reading. Coplanar is
+fine (markers on the ground surface are normal practice); collinear is
+rejected, because three points in a line leave the scene free to roll about
+that line with identical residuals.
+
+### What limits the smallest detectable movement
+
+Not the splat's resolution — the **registration**. Both captures are
+georeferenced independently, so their GCP residuals (centimetres, at best)
+are the same order as the change worth reporting. `register.py` therefore
+runs trimmed rigid ICP of the repeat capture onto the baseline, fitting only
+the best-matching 70% of correspondences so a real slip can't drag the
+alignment toward itself. That fit's inlier RMSE **is** the registration
+error term in every level of detection downstream.
+
+Consequences worth knowing before reading a report:
+
+- A poor alignment doesn't produce wrong findings, it produces *fewer*
+  findings — the level of detection widens and marginal change stops being
+  significant. Check `precision.registrationRmseM` before concluding a site
+  is stable.
+- Change below its own level of detection is reported as **not
+  significant**, never as a small number. `change.significantFraction` near
+  0.05 on stable ground is expected: that is what a 95% threshold means.
+- `measuredFraction` and `significantFraction` are different statements.
+  Unmeasured ground (no counterpart in one capture) is a reason to re-fly;
+  insignificant change is a positive finding of stability. A NaN distance is
+  the former, never the latter.
+- Movement beyond the M3C2 cylinder half-length (40 point spacings) is
+  reported as unmeasured rather than clipped, so a report never understates
+  the largest movements.
+- Volume uncertainty is deliberately not a single RSS. The roughness term is
+  independent per cell and averages down over area; the registration error is
+  systematic and grows linearly with it, so on a large region it dominates.
+  A volume from a badly registered pair should not be quoted tightly.
+- Near-vertical faces (past 80° to the projection plane) are excluded from
+  the volume and reported in `excludedSteepAreaM2`. The distances there are
+  still valid — only the area integral isn't.
+
+### What it deliberately does not do
+
+No risk score. Whether 40 mm on a bench crest matters more than 200 mm on a
+spoil pile depends on the structure below it, the geology and the design
+case, none of which are in this data. `findings` is ranked by measured
+magnitude so the head of the list is where to walk first; the engineer
+signing the report owns the interpretation.
+
+### The report contract
+
+`change-report.json` is validated by `packages/schema`'s
+`ChangeReportSchema`. Nothing enforces that across the language boundary
+except running one side's output through the other's validator:
+
+```bash
+cd pipeline && python tests/generate_sample_report.py work/sample-survey
+cd ../packages/schema && pnpm build
+node scripts/validateChangeReport.mjs < ../../pipeline/work/sample-survey/change-report.json
+```
