@@ -9,6 +9,7 @@ from .cleanup import Sam2SegmentationBackend, run_cleanup
 from .compress import run_compress
 from .errors import PipelineError
 from .extract import run_extract
+from .geo.survey import run_monitor
 from .ingest import run_ingest
 from .sfm import run_sfm
 from .train import TrainConfig, run_train
@@ -90,6 +91,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Job working directory; reads cleaned.ply, writes compressed/model.sog",
     )
 
+    monitor_parser = subparsers.add_parser(
+        "monitor",
+        help="Compare two georeferenced captures of the same ground and write a change report",
+    )
+    monitor_parser.add_argument("baseline_ply", type=Path, help="The earlier capture's cleaned PLY")
+    monitor_parser.add_argument("repeat_ply", type=Path, help="The later capture's cleaned PLY")
+    monitor_parser.add_argument(
+        "--baseline-gcps",
+        type=Path,
+        required=True,
+        help="Ground control points for the baseline capture (JSON)",
+    )
+    monitor_parser.add_argument(
+        "--repeat-gcps",
+        type=Path,
+        required=True,
+        help="Ground control points for the repeat capture (JSON)",
+    )
+    monitor_parser.add_argument(
+        "--workdir",
+        type=Path,
+        default=Path("."),
+        help="Job working directory; the report is written to <workdir>/survey/change-report.json",
+    )
+
     return parser
 
 
@@ -124,6 +150,14 @@ def main(argv: list[str] | None = None) -> int:
             run_cleanup(args.workdir, backend)
         elif args.command == "compress":
             run_compress(args.workdir)
+        elif args.command == "monitor":
+            run_monitor(
+                args.workdir,
+                args.baseline_ply,
+                args.repeat_ply,
+                args.baseline_gcps,
+                args.repeat_gcps,
+            )
     except PipelineError as error:
         logger.error(str(error))
         return 1

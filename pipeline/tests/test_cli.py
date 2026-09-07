@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from splat_pipeline.cli import _train_config_override, build_parser
 from splat_pipeline.train import TrainConfig
 
@@ -50,3 +52,24 @@ def test_cleanup_sam2_checkpoint_defaults_to_none():
 def test_cleanup_accepts_sam2_checkpoint():
     args = build_parser().parse_args(["cleanup", "--sam2-checkpoint", "/ckpt.pt"])
     assert args.sam2_checkpoint == Path("/ckpt.pt")
+
+
+def test_monitor_takes_two_captures_and_their_control_points():
+    args = build_parser().parse_args(
+        [
+            "monitor", "/base.ply", "/repeat.ply",
+            "--baseline-gcps", "/base.json",
+            "--repeat-gcps", "/repeat.json",
+            "--workdir", "/work",
+        ]
+    )
+    assert args.command == "monitor"
+    assert (args.baseline_ply, args.repeat_ply) == (Path("/base.ply"), Path("/repeat.ply"))
+    assert (args.baseline_gcps, args.repeat_gcps) == (Path("/base.json"), Path("/repeat.json"))
+
+
+def test_monitor_requires_control_points_for_both_captures():
+    # Without GCPs there is no scale, so every distance the report would
+    # quote in metres is meaningless — this must not be defaultable.
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["monitor", "/base.ply", "/repeat.ply", "--baseline-gcps", "/base.json"])
