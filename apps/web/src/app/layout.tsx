@@ -1,6 +1,13 @@
 import type { Metadata } from "next";
-import { Figtree, IBM_Plex_Mono } from "next/font/google";
+import { Figtree, IBM_Plex_Mono, Inter } from "next/font/google";
 import "./globals.css";
+
+const inter = Inter({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-inter",
+  display: "swap",
+});
 
 const figtree = Figtree({
   subsets: ["latin"],
@@ -28,7 +35,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${figtree.variable} ${plexMono.variable}`}>
+    <html lang="en" className={`${figtree.variable} ${plexMono.variable} ${inter.variable}`}>
       <body className="font-sans text-base leading-[1.55] antialiased">{children}</body>
     </html>
   );

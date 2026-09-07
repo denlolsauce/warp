@@ -28,8 +28,8 @@ export function SiteHeader() {
         <div className="flex-1" />
 
         <div className="flex items-center gap-4 sm:gap-[22px]">
-          <Link href="/signin" className="hidden text-[14.5px] text-warp-nav hover:text-warp-body sm:inline">
-            Sign in
+          <Link href="/studio" className="hidden text-[14.5px] text-warp-nav hover:text-warp-body sm:inline">
+            Studio
           </Link>
           <Link
             href="/waitlist"

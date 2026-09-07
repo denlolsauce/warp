@@ -35,10 +35,10 @@ export default function HomePage() {
 
             <div className="mt-[34px] flex flex-wrap justify-center gap-3">
               <Link
-                href="/waitlist"
+                href="/studio"
                 className="whitespace-nowrap rounded-[9px] bg-warp-accent px-6 py-[13px] text-base font-medium text-warp-accent-ink hover:bg-warp-accent-hi hover:text-warp-accent-ink"
               >
-                Join the waitlist &rarr;
+                Open the studio &rarr;
               </Link>
               <Link
                 href="/gallery"

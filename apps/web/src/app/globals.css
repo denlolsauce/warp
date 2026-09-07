@@ -36,3 +36,30 @@
     border-color: #79dcd6;
   }
 }
+
+@layer components {
+  /* Light "studio" scope — the app pages, as opposed to the dark marketing
+     site. Overrides the global dark link/selection/scheme defaults. */
+  .studio {
+    color-scheme: light;
+  }
+
+  .studio a {
+    color: inherit;
+  }
+
+  .studio a:hover {
+    color: inherit;
+  }
+
+  .studio ::selection {
+    background: #e2492f;
+    color: #fff;
+  }
+
+  .studio input:focus,
+  .studio textarea:focus,
+  .studio select:focus {
+    border-color: #cfcabf;
+  }
+}

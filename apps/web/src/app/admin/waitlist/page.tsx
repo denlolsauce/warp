@@ -52,11 +52,6 @@ export default async function AdminWaitlistPage() {
           </p>
         )}
         <div className="mt-8 flex gap-4 text-[15px]">
-          {!session?.user?.id && (
-            <Link href="/signin" className="text-warp-accent hover:text-warp-accent-hi">
-              Sign in
-            </Link>
-          )}
           <Link href="/" className="text-warp-muted hover:text-warp-body">
             Back to site
           </Link>
