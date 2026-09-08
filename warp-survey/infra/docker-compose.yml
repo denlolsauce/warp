@@ -1,0 +1,73 @@
+# Local development infrastructure for Warp Survey.
+#
+# Deliberately independent from the existing Warp product: different ports
+# (5433/6380/9000), different credentials, different bucket. Never point
+# these services at, or reuse, the existing product's infrastructure.
+name: warp-survey
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      POSTGRES_USER: warp_survey
+      POSTGRES_PASSWORD: warp_survey
+      POSTGRES_DB: warp_survey
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U warp_survey"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6380:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    environment:
+      MINIO_ROOT_USER: warp-survey-dev
+      MINIO_ROOT_PASSWORD: warp-survey-dev-secret
+    command: ["server", "/data", "--console-address", ":9001"]
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot bucket bootstrap: private bucket + CORS for direct browser
+  # multipart uploads (ETag must be exposed for part completion).
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 warp-survey-dev warp-survey-dev-secret &&
+      mc mb --ignore-existing local/warp-survey-dev &&
+      echo '{\"CORSRules\":[{\"AllowedOrigins\":[\"http://localhost:3000\"],\"AllowedMethods\":[\"PUT\",\"GET\"],\"AllowedHeaders\":[\"*\"],\"ExposeHeaders\":[\"ETag\"]}]}' > /tmp/cors.json &&
+      mc cors set local/warp-survey-dev /tmp/cors.json || true
+      "
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

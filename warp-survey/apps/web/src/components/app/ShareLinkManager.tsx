@@ -1,0 +1,8 @@
+"use client";
+import { useState } from "react";
+export function ShareLinkManager({ revisionId, links }: { revisionId: string; links: { id: string; label: string | null; expiresAt: string; revokedAt: string | null }[] }) {
+ const [result, setResult] = useState("");
+ async function create() { const r = await fetch("/api/v1/share-links", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({ surveyRevisionIds:[revisionId], label:null, expiresAt:new Date(Date.now()+7*864e5).toISOString() }) }).then(x=>x.json()); setResult(r.url ? `Copy this link now: ${r.url}` : r.error); }
+ async function revoke(id:string) { await fetch(`/api/v1/share-links/${id}`, { method:"DELETE" }); location.reload(); }
+ return <section className="rounded border border-survey-line bg-survey-card p-5"><div className="flex items-center justify-between"><div><h2 className="font-medium text-survey-heading">Stakeholder sharing</h2><p className="text-sm text-survey-muted">Read-only visualization context; not measurement evidence.</p></div><button onClick={create} className="rounded bg-survey-slate px-3 py-2 text-sm font-medium text-white">Create 7-day link</button></div>{result && <p className="mt-3 break-all rounded bg-survey-well p-2 font-mono text-xs">{result}</p>}<ul className="mt-3 space-y-2">{links.map(l=><li key={l.id} className="flex justify-between text-sm"><span>{l.label ?? "Shared revision"} · expires {new Date(l.expiresAt).toLocaleDateString()}</span>{!l.revokedAt && <button onClick={()=>revoke(l.id)} className="text-survey-danger">Revoke</button>}</li>)}</ul></section>;
+}

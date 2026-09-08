@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "messageVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "INPUT_VALIDATION",
+        "RECONSTRUCTION",
+        "DENSE_PRODUCTS",
+        "CHECKPOINT_QA",
+        "PUBLISH_MEASUREMENT",
+        "CAMERA_ADAPTATION",
+        "SPLAT_TRAINING",
+        "TERRAIN_SAFE_CLEANUP",
+        "SOG_COMPRESSION",
+        "PUBLISH_VISUALIZATION",
+        "COMPATIBILITY_CHECKS",
+        "REGISTRATION",
+        "CHANGE_COMPUTATION",
+        "PUBLISH_COMPARISON"
+      ]
+    },
+    "attempt": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "RUNNING",
+        "SUCCEEDED",
+        "FAILED"
+      ]
+    },
+    "fencingToken": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "errorMessage": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "transient": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "metrics": {
+      "anyOf": [
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "artifactKeys": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "timingSeconds": {
+      "anyOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "messageVersion",
+    "runId",
+    "stage",
+    "attempt",
+    "status",
+    "fencingToken",
+    "errorMessage",
+    "transient",
+    "metrics",
+    "artifactKeys",
+    "timingSeconds"
+  ]
+}

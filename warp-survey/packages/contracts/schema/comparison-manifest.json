@@ -1,0 +1,320 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "manifestVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "comparisonId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "siteId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "baselineRevisionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "candidateRevisionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "method": {
+      "type": "string",
+      "enum": [
+        "ELEVATION_DIFFERENCING",
+        "M3C2"
+      ]
+    },
+    "areaOfInterest": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "min": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "max": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            }
+          },
+          "required": [
+            "min",
+            "max"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "registrationCorrection": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "matrix": {
+              "minItems": 16,
+              "maxItems": 16,
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            },
+            "stableAreaDescription": {
+              "type": "string",
+              "minLength": 1
+            },
+            "residualRmseM": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "matrix",
+            "stableAreaDescription",
+            "residualRmseM"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "signConvention": {
+      "type": "string",
+      "const": "Elevation change is later minus earlier. Positive values indicate fill; negative values indicate cut."
+    },
+    "result": {
+      "anyOf": [
+        {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "const": "ELEVATION_DIFFERENCING"
+                },
+                "gridResolutionM": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "cutVolumeM3": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "fillVolumeM3": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "netVolumeM3": {
+                  "type": "number"
+                },
+                "affectedAreaM2": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "volumeUncertaintyM3": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "detectionThresholdM": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "method",
+                "gridResolutionM",
+                "cutVolumeM3",
+                "fillVolumeM3",
+                "netVolumeM3",
+                "affectedAreaM2",
+                "volumeUncertaintyM3",
+                "detectionThresholdM"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "const": "M3C2"
+                },
+                "parameters": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "meanSignedDistanceM": {
+                  "type": "number"
+                },
+                "significantChangeFraction": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "registrationUncertaintyM": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "method",
+                "parameters",
+                "meanSignedDistanceM",
+                "significantChangeFraction",
+                "registrationUncertaintyM"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "exploratory": {
+      "type": "boolean"
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "artifactId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "DENSE_POINT_CLOUD_LAZ",
+              "DSM_COG",
+              "DTM_COG",
+              "ORTHOMOSAIC_COG",
+              "COVERAGE_MASK",
+              "EXCLUSION_MASK",
+              "QUALITY_RECORD",
+              "SPLAT_SOG",
+              "SPLAT_PREVIEW_SOG",
+              "POSTER_IMAGE",
+              "CHANGE_RASTER_COG",
+              "M3C2_CLOUD_LAZ",
+              "COMPARISON_RECORD",
+              "REPORT_PDF",
+              "EXPORT_CSV"
+            ]
+          },
+          "storageKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "checksumSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "contentType": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "artifactId",
+          "kind",
+          "storageKey",
+          "checksumSha256",
+          "sizeBytes",
+          "contentType"
+        ]
+      }
+    },
+    "maskArtifactIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "manifestVersion",
+    "comparisonId",
+    "siteId",
+    "baselineRevisionId",
+    "candidateRevisionId",
+    "method",
+    "areaOfInterest",
+    "registrationCorrection",
+    "signConvention",
+    "result",
+    "exploratory",
+    "artifacts",
+    "maskArtifactIds"
+  ]
+}
