@@ -6,7 +6,7 @@ This is a production-quality Python package skeleton for a multi-stage, distribu
 
 - **Contracts**: JSON schema validation for queue messages (language-neutral).
 - **Queue**: Reliable Redis claiming via LMOVE with lease/heartbeat/reaper pattern (no BullMQ).
-- **Backends**: Abstract interface for photogrammetry (OpenDroneMap, others); pure-function config builders and output mapping; container execution stubs.
+- **Backends**: Swappable OpenDroneMap and gsplat backends, with pinned-container invocation and explicit output/provenance mapping.
 - **Coords**: Affine transform helpers for survey coordinates (translation, scale, rotation, composition, inversion).
 - **Worker**: Orchestration skeleton (claim → validate → dispatch → stages); structured logging (JSON lines).
 - **Errors**: User-facing error reporting with transient/permanent distinction.
@@ -54,11 +54,22 @@ All tests pass without external dependencies (in-memory fakes for Redis, temp fi
 | Schema validation (jsonschema) | ✓ Tested | Foundation |
 | ODM backend: config → CLI args | ✓ Tested | Foundation |
 | ODM backend: output mapping | ✓ Tested | Foundation |
-| Worker dispatch, stage lifecycle | ✓ Stubbed | Foundation |
-| **Stage execution (INGEST, MEASUREMENT, VISUALIZATION, COMPARISON)** | NotImplementedError | Technical validation |
-| **Container invocation** | NotImplementedError | Technical validation |
-| **Database persistence** | Protocol only | Operational readiness |
-| **Heartbeat thread** | Stub | Operational readiness |
+| Worker dispatch, stage lifecycle | ✓ Tested | Foundation |
+| Measurement stages (validation, ODM, dense products, checkpoint QA, publish record) | ✓ Implemented | Technical validation |
+| Visualization stages (camera adaptation, gsplat, terrain-safe cleanup, SOG, publish record) | ✓ Implemented | Technical validation |
+| Comparison stages (compatibility, stable-area registration, elevation/M3C2, publish record) | ✓ Implemented | Technical validation |
+| Container invocation and Postgres run store | ✓ Implemented | Technical validation |
+| Heartbeat thread | ✓ Implemented | Operational readiness |
+
+## Operational gate
+
+The stage implementations have unit coverage, but they have **not** yet been
+validated against a real drone survey or a deployed GPU worker. The internal
+gsplat and splat-transform images must be built, security-scanned, pushed, and
+replaced with their resulting immutable digests before an operational pilot.
+Run a controlled ODM/gsplat processing job and verify the output quality,
+resource limits, and callback persistence before treating any result as an
+engineering deliverable.
 
 ## Design notes
 

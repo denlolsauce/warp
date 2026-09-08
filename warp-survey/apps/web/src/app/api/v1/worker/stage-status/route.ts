@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { stageStatusUpdate } from "@warp-survey/contracts";
+import { stageStatusUpdate, stagesForKind } from "@warp-survey/contracts";
 import { prisma } from "@/lib/prisma";
 import { canTransitionRun, isFresh } from "@/lib/runStateMachine";
 
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
       }
 
       // Terminal stage statuses only apply to a RUNNING attempt (append-only).
-      await tx.stageAttempt.updateMany({
+      const completed = await tx.stageAttempt.updateMany({
         where: { runId: run.id, stage: update.stage, attempt: update.attempt, status: "RUNNING" },
         data: {
           status: update.status,
@@ -78,6 +78,17 @@ export async function POST(request: Request) {
           await tx.processingRun.update({
             where: { id: run.id },
             data: { status: "FAILED", errorMessage: update.errorMessage, finishedAt: new Date() },
+          });
+        }
+      }
+
+      const stages = stagesForKind(run.kind);
+      const isFinalStage = stages.at(-1) === update.stage;
+      if (update.status === "SUCCEEDED" && isFinalStage && completed.count > 0) {
+        if (canTransitionRun(run.status, "SUCCEEDED")) {
+          await tx.processingRun.update({
+            where: { id: run.id },
+            data: { status: "SUCCEEDED", finishedAt: new Date() },
           });
         }
       }

@@ -172,6 +172,14 @@ def reap_expired_leases(
 
         lease_data = redis.get(f"warp-survey:lease:{run_id}")
         if not lease_data:
+            # Redis expires the lease key at its TTL. A missing key therefore
+            # means a crashed worker's claim is overdue, not that it remains
+            # owned forever.
+            removed = redis.lrem(inflight_key, 1, message)
+            if removed > 0:
+                redis.lpush(pending_key, message)
+                moved_count += 1
+                logger.info("reaped missing lease for %s", run_id)
             continue
 
         try:

@@ -207,3 +207,14 @@ class TestQueueClaiming:
 
         assert redis._data.get(inflight_key) is None or not redis._data.get(inflight_key)
         assert redis._data.get(pending_key) == [message]
+
+    def test_reap_missing_lease(self):
+        """A real Redis TTL removes expired lease keys before the reaper sees them."""
+        redis = FakeRedis()
+        message = json.dumps({"runId": "run-1"})
+        redis._data["warp-survey:jobs:inflight"] = [message]
+
+        reap_expired_leases(redis)
+
+        assert redis._data.get("warp-survey:jobs:inflight") is None
+        assert redis._data.get("warp-survey:jobs:pending") == [message]
