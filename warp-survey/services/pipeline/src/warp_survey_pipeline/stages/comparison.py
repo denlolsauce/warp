@@ -10,6 +10,7 @@ import math
 from dataclasses import dataclass, field
 
 import numpy as np
+from rasterio.transform import Affine
 
 from ..errors import PipelineError
 from ..geo import Grid, crs_is_compatible, harmonize_grids
@@ -274,6 +275,45 @@ def _projected_offsets(
     r2 = np.einsum("ij,ij->i", radial, radial)
     mask = (r2 <= radius * radius) & (np.abs(along) <= max_depth)
     return along[mask]
+
+
+def apply_transform_to_points(points: np.ndarray, matrix: np.ndarray) -> np.ndarray:
+    """Apply a 4x4 rigid transform to an (N, 3) cloud."""
+    if points.size == 0:
+        return points
+    rotation = matrix[:3, :3]
+    translation = matrix[:3, 3]
+    return points @ rotation.T + translation
+
+
+def apply_transform_to_grid(grid: Grid, matrix: np.ndarray) -> tuple[Grid, list[str]]:
+    """Apply a rigid correction to an elevation grid.
+
+    Only the vertical shift and in-plane translation are representable in a
+    north-up raster. A correction carrying real rotation is refused rather
+    than silently discarded — a resampled, rotated surface must come from the
+    point cloud, not from pretending the rotation was zero.
+    """
+    rotation = matrix[:3, :3]
+    if not np.allclose(rotation, np.eye(3), atol=1e-6):
+        raise PipelineError(
+            "the stable-area registration includes a rotation, which cannot be applied to a "
+            "north-up elevation grid; run this comparison as M3C2 on the point clouds instead",
+            transient=False,
+        )
+    dx, dy, dz = (float(v) for v in matrix[:3, 3])
+    shifted = Grid(
+        data=grid.data + dz,
+        transform=Affine(
+            grid.transform.a, grid.transform.b, grid.transform.c + dx,
+            grid.transform.d, grid.transform.e, grid.transform.f + dy,
+        ),
+        crs=grid.crs,
+    )
+    return shifted, [
+        f"stable-area registration applied to the candidate surface: "
+        f"{dx:+.3f}/{dy:+.3f} m horizontal, {dz:+.3f} m vertical"
+    ]
 
 
 # --- rigid registration on stable areas ---------------------------------------

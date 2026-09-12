@@ -12,14 +12,20 @@ achieved benchmarks.
   must be validated on a real pilot survey before any accuracy claim or
   engineering use. The internal GPU images are not yet built and published at
   production digests.
-- **Application publication integration.** Publish stages write immutable
-  artifact records for the web app to consume, but do not yet materialize
-  `SurveyRevision`, `Artifact`, `Comparison`, or `ReportRevision` records in
-  the application database. Likewise, successful final-stage callbacks still
-  need to transition the `ProcessingRun` to `SUCCEEDED`.
-- **Comparison registration application.** Stable-area registration is
-  estimated and reported, but its transform is not yet applied to the
-  candidate raster/point cloud before change computation.
+- **Application publication integration.** Publish stages hand their
+  artifacts, quality verdict, and comparison result to the web app, which
+  materializes `SurveyRevision`, `Artifact`, and `Comparison` records. Report
+  revisions are still authored in the workspace rather than produced by the
+  pipeline, and rendered report PDFs are not yet uploaded or attached to a
+  `ReportRevision`.
+- **RTK/PPK camera positions.** Corrected camera positions are uploaded as a
+  capture file but not yet parsed, so measurement runs georeference from
+  ground control alone. The worker supports `geo.txt` positions once the
+  parser exists.
+- **Stable-area selection.** Registration is applied to the candidate data
+  when stable point pairs are supplied, but the workspace has no UI for a
+  reviewer to select stable ground, so comparisons currently run
+  unregistered.
 - **Map and viewer integration.** The workspace still has no map surface,
   and the viewer bundle is not embedded in the web application.
 - **GCP authoring.** The worker now requires genuine image observations for

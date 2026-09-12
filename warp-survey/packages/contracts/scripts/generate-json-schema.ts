@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { processingJobMessage, stageStatusUpdate } from "../src/jobs";
+import { processingJobMessage, publicationUpdate, stageStatusUpdate } from "../src/jobs";
 import { surveyManifest } from "../src/artifacts";
 import { comparisonManifest } from "../src/comparisons";
 
@@ -14,6 +14,7 @@ mkdirSync(outDir, { recursive: true });
 const schemas: Record<string, z.ZodType> = {
   "processing-job-message": processingJobMessage,
   "stage-status-update": stageStatusUpdate,
+  "publication-update": publicationUpdate,
   "survey-manifest": surveyManifest,
   "comparison-manifest": comparisonManifest,
 };

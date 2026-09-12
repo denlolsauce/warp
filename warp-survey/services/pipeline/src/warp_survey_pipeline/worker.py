@@ -71,6 +71,10 @@ class StageContext:
     workdir: str
     # Outputs of previously completed stages, keyed by stage id.
     prior_outputs: dict[str, dict] = field(default_factory=dict)
+    # Publication sink and lease fence, so publish stages can hand their
+    # durable outputs to the web app under the run's current token.
+    status_sink: StatusSink | None = None
+    fencing_token: int = 1
 
 
 # A handler returns (metrics, artifact_keys, outputs-for-marker).
@@ -251,23 +255,39 @@ class PipelineWorker:
 
     def parse_message(self, raw: str) -> QueueMessage:
         try:
-            payload = json.loads(raw)
+            envelope = json.loads(raw)
         except json.JSONDecodeError as e:
             raise PipelineError(f"malformed queue message: {e}", transient=False) from e
 
-        run_id = payload.get("runId")
-        run_kind = payload.get("runKind") or payload.get("kind")
-        survey_id = payload.get("surveyId")
-        if not all([run_id, run_kind, survey_id]):
+        run_id = envelope.get("runId")
+        run_kind = envelope.get("runKind") or envelope.get("kind")
+        if not run_id or not run_kind:
             raise PipelineError(
-                f"queue message missing required fields (runId, runKind, surveyId): {payload}",
+                f"queue message missing required fields (runId, runKind): {envelope}",
                 transient=False,
             )
         try:
             kind = RunKind(run_kind)
         except ValueError:
             raise PipelineError(f"invalid runKind: {run_kind}", transient=False)
-        return QueueMessage(run_id=run_id, run_kind=kind, survey_id=survey_id, payload=payload)
+
+        # COMPARISON runs span two surveys and carry a comparisonId instead.
+        survey_id = envelope.get("surveyId")
+        if kind is not RunKind.COMPARISON and not survey_id:
+            raise PipelineError(
+                f"a {kind.value} run requires a surveyId: {envelope}", transient=False
+            )
+
+        # Stage inputs live under `payload`; older messages put them at the top
+        # level, so fall back to the envelope itself.
+        payload = envelope.get("payload")
+        if not isinstance(payload, dict):
+            payload = envelope
+        payload = {**payload, "comparisonId": envelope.get("comparisonId", payload.get("comparisonId"))}
+
+        return QueueMessage(
+            run_id=run_id, run_kind=kind, survey_id=survey_id or "", payload=payload
+        )
 
     def log_structured(self, event: str, run_id: str, stage: str | None = None, **kwargs) -> None:
         record = {
@@ -296,6 +316,8 @@ class PipelineWorker:
             message=message,
             store=self.object_store,
             workdir=f"{self.workdir}/{message.run_id}",
+            status_sink=self.status_sink,
+            fencing_token=self.fencing_token or 1,
         )
 
         try:

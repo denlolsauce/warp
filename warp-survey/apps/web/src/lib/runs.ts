@@ -1,5 +1,11 @@
 import type { RunKind } from "@prisma/client";
 import type { ProcessingJobMessage } from "@warp-survey/contracts";
+import {
+  PayloadError,
+  buildComparisonPayload,
+  buildMeasurementPayload,
+  buildVisualizationPayload,
+} from "./jobPayloads";
 import { prisma } from "./prisma";
 import { enqueueViaOutbox, relayOutbox } from "./queue";
 
@@ -21,6 +27,10 @@ export async function submitProcessingRun(params: {
   });
   if (existing) return { runId: existing.id, created: false };
 
+  // Resolve inputs before creating the run: a run that can never execute
+  // should surface its reason at submission, not as a stage failure later.
+  const payload = await buildPayload(params);
+
   const run = await prisma.$transaction(async (tx) => {
     const created = await tx.processingRun.create({
       data: {
@@ -34,11 +44,12 @@ export async function submitProcessingRun(params: {
       messageVersion: 1,
       runId: created.id,
       kind: params.kind,
-      surveyId: params.surveyId ?? "",
+      surveyId: params.surveyId,
       organizationId: params.organizationId,
       comparisonId: params.comparisonId,
       idempotencyKey: params.idempotencyKey,
       enqueuedAt: new Date().toISOString(),
+      payload,
     };
     await enqueueViaOutbox(tx, message);
     return created;
@@ -48,4 +59,22 @@ export async function submitProcessingRun(params: {
   await relayOutbox().catch(() => undefined);
 
   return { runId: run.id, created: true };
+}
+
+async function buildPayload(params: {
+  kind: RunKind;
+  surveyId: string | null;
+  comparisonId: string | null;
+}): Promise<ProcessingJobMessage["payload"]> {
+  switch (params.kind) {
+    case "MEASUREMENT":
+      if (!params.surveyId) throw new PayloadError("A measurement run requires a survey");
+      return buildMeasurementPayload(params.surveyId);
+    case "VISUALIZATION":
+      if (!params.surveyId) throw new PayloadError("A visualization run requires a survey");
+      return buildVisualizationPayload(params.surveyId);
+    case "COMPARISON":
+      if (!params.comparisonId) throw new PayloadError("A comparison run requires a comparison");
+      return buildComparisonPayload(params.comparisonId);
+  }
 }

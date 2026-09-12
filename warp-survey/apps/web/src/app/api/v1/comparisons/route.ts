@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { authzErrorResponse, requireSiteAccess } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { submitProcessingRun } from "@/lib/runs";
+import { PayloadError } from "@/lib/jobPayloads";
 
 export async function POST(request: Request) {
   try {
@@ -73,6 +74,9 @@ export async function POST(request: Request) {
       { status: 202 },
     );
   } catch (error) {
+    if (error instanceof PayloadError) {
+      return Response.json({ error: error.message }, { status: 409 });
+    }
     return authzErrorResponse(error) ?? Response.json({ error: "Internal error" }, { status: 500 });
   }
 }

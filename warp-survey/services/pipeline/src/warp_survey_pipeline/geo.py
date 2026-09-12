@@ -34,8 +34,8 @@ class Grid:
 
     def bounds(self) -> tuple[float, float, float, float]:
         h, w = self.data.shape
-        left, top = self.transform * (0, 0)
-        right, bottom = self.transform * (w, h)
+        left, top = self.transform @ (0, 0)
+        right, bottom = self.transform @ (w, h)
         return (min(left, right), min(top, bottom), max(left, right), max(top, bottom))
 
 
@@ -124,7 +124,7 @@ def harmonize_grids(a: Grid, b: Grid) -> tuple[Grid, Grid]:
 
 def sample_grid(grid: Grid, easting: float, northing: float) -> float:
     """Bilinear sample; NaN outside coverage or on nodata neighbours."""
-    col, row = ~grid.transform * (easting, northing)
+    col, row = ~grid.transform @ (easting, northing)
     # Shift to cell-center coordinates for interpolation.
     col -= 0.5
     row -= 0.5

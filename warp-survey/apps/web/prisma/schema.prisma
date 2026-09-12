@@ -353,6 +353,9 @@ model SurveyRevision {
   candidateComparisons Comparison[] @relation("candidateRevision")
   shareLinkRevisions   ShareLinkRevision[]
 
+  /// One revision per run: a replayed publication reuses it rather than
+  /// creating a second revision for the same processing attempt.
+  @@unique([runId])
   @@index([surveyId])
 }
 
@@ -373,6 +376,8 @@ model Artifact {
 
   revision SurveyRevision @relation(fields: [revisionId], references: [id])
 
+  /// Artifacts are immutable: republishing the same object is a no-op.
+  @@unique([revisionId, storageKey])
   @@index([revisionId])
 }
 

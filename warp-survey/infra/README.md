@@ -44,7 +44,10 @@ plus deleting `.data/` gives a clean slate.
   CPU/GPU capacity as stages require. It consumes the Redis queue
   (language-neutral JSON messages validated against
   `packages/contracts/schema/`), leases jobs with heartbeats and fencing
-  tokens, and reports stage status to the web app's
-  `/api/v1/worker/stage-status` callback using `WORKER_CALLBACK_SECRET`.
+  tokens, and reports to the web app using `WORKER_CALLBACK_SECRET` on two
+  callbacks: `/api/v1/worker/stage-status` for stage lifecycle, and
+  `/api/v1/worker/publication` for a finished branch's durable outputs. The
+  worker writes objects to storage but never writes application records
+  directly — tenancy, immutability, and quality gating stay in the web app.
 - **Secrets**: never share credentials with the existing Warp product, and
   never place secrets in client code.

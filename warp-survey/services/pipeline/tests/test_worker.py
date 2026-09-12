@@ -70,8 +70,37 @@ class TestParseMessage:
 
     def test_parse_message_missing_survey_id(self, worker):
         raw = json.dumps({"runId": "run-123", "runKind": "MEASUREMENT"})
-        with pytest.raises(PipelineError, match="required fields"):
+        with pytest.raises(PipelineError, match="requires a surveyId"):
             worker.parse_message(raw)
+
+    def test_comparison_message_needs_no_survey_id(self, worker):
+        """A comparison spans two surveys and carries a comparisonId instead."""
+        raw = json.dumps(
+            {
+                "runId": "run-1",
+                "kind": "COMPARISON",
+                "surveyId": None,
+                "comparisonId": "cmp-1",
+                "payload": {"method": "M3C2"},
+            }
+        )
+        message = worker.parse_message(raw)
+        assert message.run_kind == RunKind.COMPARISON
+        assert message.payload["comparisonId"] == "cmp-1"
+        assert message.payload["method"] == "M3C2"
+
+    def test_stage_inputs_come_from_the_nested_payload(self, worker):
+        raw = json.dumps(
+            {
+                "runId": "run-1",
+                "kind": "MEASUREMENT",
+                "surveyId": "survey-1",
+                "payload": {"imageKeys": ["a.jpg", "b.jpg"], "crs": "EPSG:25832"},
+            }
+        )
+        message = worker.parse_message(raw)
+        assert message.payload["imageKeys"] == ["a.jpg", "b.jpg"]
+        assert message.payload["crs"] == "EPSG:25832"
 
     def test_parse_message_invalid_run_kind(self, worker):
         raw = json.dumps({"runId": "run-123", "runKind": "INVALID_KIND", "surveyId": "survey-456"})

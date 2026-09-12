@@ -14,6 +14,7 @@ import numpy as np
 from .backends.base import CameraRecord, ReconstructionRequest
 from .backends.odm import OpenDroneMapBackend
 from .backends.splat import GsplatBackend, SplatTrainingRequest
+from .callbacks import publication_update
 from .errors import PipelineError
 from .geo import read_grid
 from .pointcloud import read_laz
@@ -25,6 +26,8 @@ from .stages.checkpoint_qa import (
 from .stages.comparison import (
     SIGN_CONVENTION,
     EpochInputs,
+    apply_transform_to_grid,
+    apply_transform_to_points,
     check_compatibility,
     comparison_is_exploratory,
     elevation_differencing,
@@ -263,32 +266,144 @@ def handle_checkpoint_qa(context: StageContext):
     return metrics, [artifact.storage_key], outputs
 
 
+def _artifact_entry(stored: dict, kind: str, content_type: str, spatial: dict | None = None) -> dict:
+    """One publishedArtifact record from a stage's stored-artifact dict."""
+    return {
+        "kind": kind,
+        "storageKey": stored["key"],
+        "checksumSha256": stored["sha256"],
+        "sizeBytes": int(stored["size"]),
+        "contentType": content_type,
+        "spatialMetadata": spatial,
+    }
+
+
+COG_CONTENT_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
+
+
 def handle_publish_measurement(context: StageContext):
-    """Assemble the revision summary the web app persists as a SurveyRevision."""
+    """Publish the measurement branch's durable outputs to the web app."""
     dense = context.prior_outputs.get("DENSE_PRODUCTS")
     qa = context.prior_outputs.get("CHECKPOINT_QA")
     recon = context.prior_outputs.get("RECONSTRUCTION")
     if not (dense and qa and recon):
         raise PipelineError("earlier measurement stages are incomplete", transient=True)
 
-    summary = {
-        "surveyId": context.message.survey_id,
-        "runId": context.message.run_id,
-        "measurementQuality": qa["quality"],
-        "artifacts": {**recon["artifacts"], **dense["artifacts"]},
+    spatial = {
+        "crs": context.message.payload.get("crs"),
+        "verticalDatum": context.message.payload.get("verticalDatum"),
         "bounds": dense["bounds"],
         "resolutionM": dense["resolutionM"],
-        "provenance": recon["provenance"],
     }
-    workdir = _workdir(context, "PUBLISH_MEASUREMENT")
-    path = workdir / "revision_summary.json"
-    path.write_text(json.dumps(summary, indent=2))
+    artifacts = []
+    for name, kind, ctype in [
+        ("dense_cloud", "DENSE_POINT_CLOUD_LAZ", "application/vnd.laszip"),
+        ("dsm", "DSM_COG", COG_CONTENT_TYPE),
+        ("dtm", "DTM_COG", COG_CONTENT_TYPE),
+        ("orthomosaic", "ORTHOMOSAIC_COG", COG_CONTENT_TYPE),
+        ("coverage_mask", "COVERAGE_MASK", COG_CONTENT_TYPE),
+    ]:
+        stored = dense["artifacts"].get(name) or recon["artifacts"].get(name)
+        if stored:
+            artifacts.append(_artifact_entry(stored, kind, ctype, spatial))
+
+    quality = qa["quality"]
+    recon_metrics = recon.get("metrics", {})
+    measurement_quality = {
+        "state": quality["state"],
+        "checkpoints": quality.get("checkpoints"),
+        "groundSamplingDistanceM": dense.get("resolutionM"),
+        "registeredImages": int(recon_metrics.get("registered_images", 0)),
+        "totalImages": int(recon_metrics.get("total_images", 0)),
+        "acceptanceProfileId": quality.get("acceptanceProfileId"),
+        "acceptanceProfileVersion": quality.get("acceptanceProfileVersion"),
+        "findings": quality.get("findings", []),
+    }
+
+    bounds_2d = dense["bounds"]  # (minx, miny, maxx, maxy)
+    bounds = {
+        "min": [bounds_2d[0], bounds_2d[1], 0.0],
+        "max": [bounds_2d[2], bounds_2d[3], 0.0],
+    }
+
+    # The viewer frame is the engineering frame translated by this origin.
+    # Deriving it here, from published bounds, keeps the visualization branch
+    # from inventing one (and from rendering at float32-hostile magnitudes).
+    local_origin = [
+        (bounds_2d[0] + bounds_2d[2]) / 2.0,
+        (bounds_2d[1] + bounds_2d[3]) / 2.0,
+        0.0,
+    ]
+    spatial_reference = {
+        "horizontalCrs": context.message.payload.get("crs"),
+        "verticalDatum": {"id": context.message.payload.get("verticalDatum")},
+        "unit": context.message.payload.get("units", "metre"),
+        "localOrigin": local_origin,
+        "transforms": [],
+    }
+
+    summary_artifact = _store_summary(
+        context,
+        "PUBLISH_MEASUREMENT",
+        "revision_summary.json",
+        {
+            "surveyId": context.message.survey_id,
+            "runId": context.message.run_id,
+            "measurementQuality": measurement_quality,
+            "artifacts": artifacts,
+            "bounds": bounds,
+            "spatial": spatial_reference,
+            "provenance": recon["provenance"],
+        },
+    )
+    artifacts.append(_artifact_entry(summary_artifact, "QUALITY_RECORD", "application/json", None))
+
+    _publish(
+        context,
+        branch="MEASUREMENT",
+        artifacts=artifacts,
+        provenance=recon["provenance"],
+        measurement_quality=measurement_quality,
+        bounds=bounds,
+        spatial=spatial_reference,
+    )
+    return (
+        {"published": True, "artifactCount": len(artifacts)},
+        [a["storageKey"] for a in artifacts],
+        {"summaryKey": summary_artifact["key"], "artifacts": artifacts, "localOrigin": local_origin},
+    )
+
+
+def _store_summary(context: StageContext, stage: str, filename: str, document: dict) -> dict:
+    workdir = _workdir(context, stage)
+    path = workdir / filename
+    path.write_text(json.dumps(document, indent=2))
     artifact = store_artifact(
         context.store, path,
-        f"runs/{context.message.run_id}/PUBLISH_MEASUREMENT/revision_summary.json",
+        f"runs/{context.message.run_id}/{stage}/{filename}",
         "application/json",
     )
-    return {"published": True}, [artifact.storage_key], {"summaryKey": artifact.storage_key}
+    return {
+        "key": artifact.storage_key,
+        "sha256": artifact.checksum_sha256,
+        "size": artifact.size_bytes,
+    }
+
+
+def _publish(context: StageContext, **kwargs) -> None:
+    """Hand durable outputs to the web app, which owns the records the
+    workspace reads. Without a sink the stage still stores its artifacts."""
+    sink = context.status_sink
+    if sink is None:
+        logger.warning("no status sink configured; publication for %s not delivered", context.message.run_id)
+        return
+    sink.publish(
+        publication_update(
+            run_id=context.message.run_id,
+            fencing_token=context.fencing_token,
+            **kwargs,
+        )
+    )
 
 
 # --- VISUALIZATION branch --------------------------------------------------------
@@ -418,27 +533,46 @@ def handle_sog_compression(context: StageContext):
 
 def handle_publish_visualization(context: StageContext):
     sog = context.prior_outputs.get("SOG_COMPRESSION")
+    training = context.prior_outputs.get("SPLAT_TRAINING", {})
     if not sog:
         raise PipelineError("SOG_COMPRESSION outputs are missing", transient=True)
-    summary = {
-        "surveyId": context.message.survey_id,
-        "runId": context.message.run_id,
-        "visualizationQuality": {
-            "state": "UNVERIFIED",
-            "gaussianCount": sog["gaussianCount"],
-            "findings": ["visual QA is a human review step; the splat is never a measurement product"],
-        },
-        "artifacts": sog["artifacts"],
+
+    visualization_quality = {
+        "state": "UNVERIFIED",
+        "gaussianCount": sog["gaussianCount"],
+        "findings": ["visual QA is a human review step; the splat is never a measurement product"],
     }
-    workdir = _workdir(context, "PUBLISH_VISUALIZATION")
-    path = workdir / "visualization_summary.json"
-    path.write_text(json.dumps(summary, indent=2))
-    artifact = store_artifact(
-        context.store, path,
-        f"runs/{context.message.run_id}/PUBLISH_VISUALIZATION/visualization_summary.json",
-        "application/json",
+    artifacts = [
+        _artifact_entry(sog["artifacts"][name], kind, "application/octet-stream")
+        for name, kind in (("sog", "SPLAT_SOG"), ("preview_sog", "SPLAT_PREVIEW_SOG"))
+        if name in sog["artifacts"]
+    ]
+    provenance = training.get("provenance", {})
+
+    summary_artifact = _store_summary(
+        context,
+        "PUBLISH_VISUALIZATION",
+        "visualization_summary.json",
+        {
+            "surveyId": context.message.survey_id,
+            "runId": context.message.run_id,
+            "visualizationQuality": visualization_quality,
+            "artifacts": artifacts,
+        },
     )
-    return {"published": True}, [artifact.storage_key], {"summaryKey": artifact.storage_key}
+
+    _publish(
+        context,
+        branch="VISUALIZATION",
+        artifacts=artifacts,
+        provenance=provenance,
+        visualization_quality=visualization_quality,
+    )
+    return (
+        {"published": True, "artifactCount": len(artifacts)},
+        [a["storageKey"] for a in artifacts],
+        {"summaryKey": summary_artifact["key"], "artifacts": artifacts},
+    )
 
 
 # --- COMPARISON branch -------------------------------------------------------------
@@ -500,6 +634,13 @@ def handle_change_computation(context: StageContext):
 
     baseline_rmse = payload["baseline"].get("verticalRmseM")
     candidate_rmse = payload["candidate"].get("verticalRmseM")
+    registration = context.prior_outputs.get("REGISTRATION", {})
+    correction = (
+        np.asarray(registration["matrix"], dtype=np.float64).reshape(4, 4)
+        if registration.get("applied")
+        else None
+    )
+    registration_findings: list[str] = []
 
     if method == "ELEVATION_DIFFERENCING":
         earlier_local = workdir / "earlier_dsm.tif"
@@ -508,8 +649,12 @@ def handle_change_computation(context: StageContext):
         context.store.download_file(payload["candidate"]["dsmKey"], later_local)
         aoi = tuple(payload["areaOfInterest"]) if payload.get("areaOfInterest") else None
 
+        later_grid = read_grid(later_local)
+        if correction is not None:
+            later_grid, registration_findings = apply_transform_to_grid(later_grid, correction)
+
         result = elevation_differencing(
-            read_grid(earlier_local), read_grid(later_local),
+            read_grid(earlier_local), later_grid,
             baseline_rmse, candidate_rmse, aoi,
         )
         change_path = workdir / "change.tif"
@@ -535,17 +680,23 @@ def handle_change_computation(context: StageContext):
         }
         findings = result.findings
         artifact_keys = [artifact.storage_key]
-        artifacts = {"change_raster": {"key": artifact.storage_key, "sha256": artifact.checksum_sha256}}
+        artifacts = {"change_raster": {"key": artifact.storage_key, "sha256": artifact.checksum_sha256, "size": artifact.size_bytes}}
     elif method == "M3C2":
         earlier_local = workdir / "earlier.laz"
         later_local = workdir / "later.laz"
         context.store.download_file(payload["baseline"]["cloudKey"], earlier_local)
         context.store.download_file(payload["candidate"]["cloudKey"], later_local)
-        params = payload.get("m3c2Parameters", {})
-        registration = context.prior_outputs.get("REGISTRATION", {})
+        params = payload.get("m3c2Parameters") or {}
+
+        later_points = read_laz(later_local)
+        if correction is not None:
+            later_points = apply_transform_to_points(later_points, correction)
+            registration_findings = [
+                "stable-area registration applied to the candidate cloud before distance computation"
+            ]
 
         result = m3c2(
-            read_laz(earlier_local), read_laz(later_local),
+            read_laz(earlier_local), later_points,
             normal_radius=float(params.get("normalRadiusM", 2.0)),
             projection_radius=float(params.get("projectionRadiusM", 1.0)),
             max_depth=float(params.get("maxDepthM", 10.0)),
@@ -576,7 +727,7 @@ def handle_change_computation(context: StageContext):
         }
         findings = result.findings
         artifact_keys = [artifact.storage_key]
-        artifacts = {"m3c2_cloud": {"key": artifact.storage_key, "sha256": artifact.checksum_sha256}}
+        artifacts = {"m3c2_cloud": {"key": artifact.storage_key, "sha256": artifact.checksum_sha256, "size": artifact.size_bytes}}
     else:
         raise PipelineError(f"unknown comparison method: {method}", transient=False)
 
@@ -585,7 +736,7 @@ def handle_change_computation(context: StageContext):
         "result": contract_result,
         "signConvention": SIGN_CONVENTION,
         "exploratory": compat.get("exploratory", True),
-        "findings": findings + compat.get("notes", []),
+        "findings": findings + registration_findings + compat.get("notes", []),
         "artifacts": artifacts,
     }
     return metrics, artifact_keys, outputs
@@ -596,23 +747,55 @@ def handle_publish_comparison(context: StageContext):
     if not change:
         raise PipelineError("CHANGE_COMPUTATION outputs are missing", transient=True)
     payload = context.message.payload
+    registration = context.prior_outputs.get("REGISTRATION", {})
+
+    kind_by_name = {"change_raster": "CHANGE_RASTER_COG", "m3c2_cloud": "M3C2_CLOUD_LAZ"}
+    ctype_by_name = {"change_raster": COG_CONTENT_TYPE, "m3c2_cloud": "application/vnd.laszip"}
+    artifacts = [
+        _artifact_entry(stored, kind_by_name[name], ctype_by_name[name])
+        for name, stored in change["artifacts"].items()
+        if name in kind_by_name
+    ]
+
+    comparison = {
+        "comparisonId": payload.get("comparisonId"),
+        "method": change["method"],
+        "signConvention": SIGN_CONVENTION,
+        "result": change["result"],
+        "exploratory": change["exploratory"],
+        "registrationCorrection": (
+            {
+                "matrix": registration["matrix"],
+                "stableAreaDescription": registration["stableAreaDescription"],
+                "residualRmseM": registration["residualRmseM"],
+            }
+            if registration.get("applied")
+            else None
+        ),
+        "findings": change["findings"],
+    }
 
     record = {
-        "comparisonId": payload.get("comparisonId"),
         "runId": context.message.run_id,
         "baselineRevisionId": payload["baseline"]["revisionId"],
         "candidateRevisionId": payload["candidate"]["revisionId"],
-        **{k: change[k] for k in ("method", "result", "signConvention", "exploratory", "findings", "artifacts")},
+        **comparison,
     }
-    workdir = _workdir(context, "PUBLISH_COMPARISON")
-    path = workdir / "comparison_record.json"
-    path.write_text(json.dumps(record, indent=2))
-    artifact = store_artifact(
-        context.store, path,
-        f"runs/{context.message.run_id}/PUBLISH_COMPARISON/comparison_record.json",
-        "application/json",
+    summary_artifact = _store_summary(context, "PUBLISH_COMPARISON", "comparison_record.json", record)
+    artifacts.append(_artifact_entry(summary_artifact, "COMPARISON_RECORD", "application/json"))
+
+    _publish(
+        context,
+        branch="COMPARISON",
+        artifacts=artifacts,
+        provenance={"pipeline": "warp-survey-pipeline"},
+        comparison=comparison,
     )
-    return {"published": True}, [artifact.storage_key], {"recordKey": artifact.storage_key}
+    return (
+        {"published": True, "artifactCount": len(artifacts)},
+        [a["storageKey"] for a in artifacts],
+        {"recordKey": summary_artifact["key"], "artifacts": artifacts},
+    )
 
 
 DEFAULT_HANDLERS = {
