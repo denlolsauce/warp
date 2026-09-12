@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "warp-survey-pipeline"
+version = "0.1.0"
+description = "Survey → measurement and visualization pipeline"
+requires-python = ">=3.11"
+dependencies = [
+    "redis>=8.1.0",
+    "psycopg[binary]>=3.3.4",
+    "boto3>=1.43.72",
+    "jsonschema>=4.20.0",
+    "python-dotenv>=1.2.2",
+    "numpy>=2.0.0",
+    "laspy[lazrs]>=2.5.0",
+    "rasterio>=1.4.0",
+    "pyproj>=3.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/warp_survey_pipeline"]

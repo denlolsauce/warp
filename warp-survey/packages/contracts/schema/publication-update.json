@@ -1,0 +1,542 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "messageVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fencingToken": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "branch": {
+      "type": "string",
+      "enum": [
+        "MEASUREMENT",
+        "VISUALIZATION",
+        "COMPARISON"
+      ]
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "DENSE_POINT_CLOUD_LAZ",
+              "DSM_COG",
+              "DTM_COG",
+              "ORTHOMOSAIC_COG",
+              "COVERAGE_MASK",
+              "EXCLUSION_MASK",
+              "QUALITY_RECORD",
+              "SPLAT_SOG",
+              "SPLAT_PREVIEW_SOG",
+              "POSTER_IMAGE",
+              "CHANGE_RASTER_COG",
+              "M3C2_CLOUD_LAZ",
+              "COMPARISON_RECORD",
+              "REPORT_PDF",
+              "EXPORT_CSV"
+            ]
+          },
+          "storageKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "checksumSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "contentType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "spatialMetadata": {
+            "anyOf": [
+              {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "storageKey",
+          "checksumSha256",
+          "sizeBytes",
+          "contentType",
+          "spatialMetadata"
+        ]
+      }
+    },
+    "measurementQuality": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "UNVERIFIED",
+                "PASS",
+                "FAIL"
+              ]
+            },
+            "checkpoints": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "horizontalRmseM": {
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "verticalRmseM": {
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "horizontalBiasM": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "verticalBiasM": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "maxHorizontalResidualM": {
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "maxVerticalResidualM": {
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "distributionNote": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "count",
+                    "horizontalRmseM",
+                    "verticalRmseM",
+                    "horizontalBiasM",
+                    "verticalBiasM",
+                    "maxHorizontalResidualM",
+                    "maxVerticalResidualM",
+                    "distributionNote"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "groundSamplingDistanceM": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "registeredImages": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "totalImages": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "acceptanceProfileId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "acceptanceProfileVersion": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "findings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "state",
+            "checkpoints",
+            "groundSamplingDistanceM",
+            "registeredImages",
+            "totalImages",
+            "acceptanceProfileId",
+            "acceptanceProfileVersion",
+            "findings"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "visualizationQuality": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "UNVERIFIED",
+                "PASS",
+                "FAIL"
+              ]
+            },
+            "gaussianCount": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "findings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "state",
+            "gaussianCount",
+            "findings"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "bounds": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "min": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "max": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            }
+          },
+          "required": [
+            "min",
+            "max"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "spatial": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "horizontalCrs": {
+              "type": "string",
+              "pattern": "^EPSG:\\d+$"
+            },
+            "verticalDatum": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ]
+            },
+            "unit": {
+              "type": "string",
+              "enum": [
+                "metre",
+                "us_survey_foot",
+                "international_foot"
+              ]
+            },
+            "localOrigin": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "transforms": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "type": "string",
+                    "enum": [
+                      "RECONSTRUCTION",
+                      "ENGINEERING",
+                      "LOCAL_VIEWER"
+                    ]
+                  },
+                  "to": {
+                    "type": "string",
+                    "enum": [
+                      "RECONSTRUCTION",
+                      "ENGINEERING",
+                      "LOCAL_VIEWER"
+                    ]
+                  },
+                  "matrix": {
+                    "minItems": 16,
+                    "maxItems": 16,
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    }
+                  },
+                  "uncertaintyMetres": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "derivation": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "from",
+                  "to",
+                  "matrix",
+                  "uncertaintyMetres",
+                  "derivation"
+                ]
+              }
+            }
+          },
+          "required": [
+            "horizontalCrs",
+            "verticalDatum",
+            "unit",
+            "localOrigin",
+            "transforms"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "comparison": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "comparisonId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "method": {
+              "type": "string",
+              "enum": [
+                "ELEVATION_DIFFERENCING",
+                "M3C2"
+              ]
+            },
+            "signConvention": {
+              "type": "string",
+              "const": "Elevation change is later minus earlier. Positive values indicate fill; negative values indicate cut."
+            },
+            "result": {},
+            "exploratory": {
+              "type": "boolean"
+            },
+            "registrationCorrection": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "findings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "comparisonId",
+            "method",
+            "signConvention",
+            "result",
+            "exploratory",
+            "registrationCorrection",
+            "findings"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "messageVersion",
+    "runId",
+    "fencingToken",
+    "branch",
+    "artifacts",
+    "measurementQuality",
+    "visualizationQuality",
+    "bounds",
+    "spatial",
+    "comparison",
+    "provenance"
+  ]
+}

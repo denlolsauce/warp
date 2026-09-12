@@ -1,0 +1,536 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Auth (Auth.js @auth/prisma-adapter standard tables)
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  createdAt     DateTime  @default(now())
+
+  accounts        Account[]
+  sessions        Session[]
+  memberships     Membership[]
+  reviewDecisions ReviewDecision[]
+  reportRevisions ReportRevision[]
+  auditEvents     AuditEvent[]
+  shareLinks      ShareLink[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy
+// ---------------------------------------------------------------------------
+
+enum MembershipRole {
+  OWNER
+  ADMIN
+  ENGINEER
+  REVIEWER
+  VIEWER
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  memberships   Membership[]
+  sites         Site[]
+  auditEvents   AuditEvent[]
+  subscriptions SiteSubscription[]
+}
+
+model Membership {
+  id     String         @id @default(cuid())
+  userId String
+  orgId  String
+  role   MembershipRole @default(VIEWER)
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+  @@index([orgId])
+}
+
+// ---------------------------------------------------------------------------
+// Sites and surveys
+// ---------------------------------------------------------------------------
+
+model Site {
+  id            String   @id @default(cuid())
+  orgId         String
+  name          String
+  /// EPSG code, e.g. "EPSG:25832".
+  horizontalCrs String
+  /// Vertical datum identifier, e.g. "EPSG:7837" or "ELLIPSOIDAL".
+  verticalDatum String
+  /// GeoJSON polygon in the site CRS.
+  boundary      Json?
+  createdAt     DateTime @default(now())
+
+  org                Organization        @relation(fields: [orgId], references: [id])
+  surveys            Survey[]
+  comparisons        Comparison[]
+  acceptanceProfiles AcceptanceProfile[]
+  subscriptions      SiteSubscription[]
+
+  @@index([orgId])
+}
+
+/// Numeric tolerances a survey must meet for engineering approval, versioned
+/// and reviewer-approved per site. Missing criteria block approval — the
+/// pipeline never invents defaults.
+model AcceptanceProfile {
+  id                     String    @id @default(cuid())
+  siteId                 String
+  version                Int
+  /// Tolerances: e.g. { horizontalRmseM: 0.05, verticalRmseM: 0.05, minCheckpoints: 5 }.
+  criteria               Json
+  approvedByUserId       String?
+  approvedAt             DateTime?
+  createdAt              DateTime  @default(now())
+
+  site Site @relation(fields: [siteId], references: [id])
+
+  @@unique([siteId, version])
+}
+
+enum SurveyStatus {
+  DRAFT
+  UPLOADING
+  READY_FOR_PROCESSING
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+/// One capture epoch at one site. Inputs are immutable once processing starts.
+model Survey {
+  id         String       @id @default(cuid())
+  siteId     String
+  capturedAt DateTime
+  status     SurveyStatus @default(DRAFT)
+  notes      String?
+  createdAt  DateTime     @default(now())
+
+  site          Site            @relation(fields: [siteId], references: [id])
+  captureFiles  CaptureFile[]
+  controlPoints ControlPoint[]
+  runs          ProcessingRun[]
+  revisions     SurveyRevision[]
+
+  @@index([siteId, capturedAt])
+}
+
+enum CaptureFileKind {
+  DRONE_JPEG
+  VIDEO_MP4
+  VIDEO_MOV
+  RTK_POSITIONS_CSV
+  GCP_CSV
+  CHECKPOINT_CSV
+}
+
+enum CaptureFileStatus {
+  UPLOADING
+  UPLOADED
+  ABORTED
+}
+
+model CaptureFile {
+  id          String            @id @default(cuid())
+  surveyId    String
+  kind        CaptureFileKind
+  filename    String
+  storageKey  String
+  contentType String
+  sizeBytes   BigInt
+  status      CaptureFileStatus @default(UPLOADING)
+  /// SHA-256, recorded after upload completion.
+  checksum    String?
+  uploadedAt  DateTime?
+  createdAt   DateTime          @default(now())
+
+  survey Survey @relation(fields: [surveyId], references: [id])
+
+  @@index([surveyId])
+}
+
+enum ControlPointRole {
+  /// Used in reconstruction optimization.
+  GCP
+  /// Independent checkpoints — withheld from optimization, used only for QA.
+  CHECKPOINT
+}
+
+model ControlPoint {
+  id                  String           @id @default(cuid())
+  surveyId            String
+  role                ControlPointRole
+  label               String
+  easting             Float
+  northing            Float
+  elevation           Float
+  horizontalAccuracyM Float?
+  verticalAccuracyM   Float?
+  /// Image observations: [{ captureFileId, x, y }].
+  observations        Json?
+  createdAt           DateTime         @default(now())
+
+  survey Survey @relation(fields: [surveyId], references: [id])
+
+  @@unique([surveyId, role, label])
+  @@index([surveyId])
+}
+
+// ---------------------------------------------------------------------------
+// Processing
+// ---------------------------------------------------------------------------
+
+enum RunKind {
+  MEASUREMENT
+  VISUALIZATION
+  COMPARISON
+}
+
+enum RunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+/// One versioned execution of one branch. Measurement and visualization runs
+/// for the same survey complete or fail independently.
+model ProcessingRun {
+  id             String    @id @default(cuid())
+  surveyId       String?
+  comparisonId   String?
+  kind           RunKind
+  status         RunStatus @default(QUEUED)
+  /// Client idempotency key; a duplicate submission returns the existing run.
+  idempotencyKey String
+  /// Highest fencing token issued; stage updates with a lower token are stale.
+  fencingToken   Int       @default(0)
+  errorMessage   String?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  survey        Survey?        @relation(fields: [surveyId], references: [id])
+  comparison    Comparison?    @relation(fields: [comparisonId], references: [id])
+  stageAttempts StageAttempt[]
+  revisions     SurveyRevision[]
+
+  @@unique([idempotencyKey])
+  @@index([surveyId])
+  @@index([status, createdAt])
+}
+
+enum StageStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+/// Append-only: a retried stage is a new row at attempt + 1, never a reused
+/// row. Terminal states don't transition.
+model StageAttempt {
+  id            String      @id @default(cuid())
+  runId         String
+  /// StageId from @warp-survey/contracts; the enum's stored text is the interface.
+  stage         String
+  attempt       Int         @default(1)
+  status        StageStatus @default(PENDING)
+  /// Hash of the exact stage configuration used.
+  configHash    String?
+  /// Backend/container identity for provenance.
+  backendVersion String?
+  containerDigest String?
+  errorMessage  String?
+  /// True when the failure was transient infrastructure (retryable) rather
+  /// than data quality (requires revised inputs).
+  transient     Boolean?
+  metrics       Json?
+  artifactKeys  String[]
+  logKey        String?
+  timingSeconds Float?
+  workerId      String?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime    @default(now())
+
+  run ProcessingRun @relation(fields: [runId], references: [id])
+
+  @@unique([runId, stage, attempt])
+  @@index([runId])
+}
+
+/// Transactional outbox: queue messages are written in the same transaction
+/// as the ProcessingRun, then relayed to Redis. Prevents a committed run
+/// without queue delivery (and vice versa).
+model OutboxMessage {
+  id          String    @id @default(cuid())
+  queue       String
+  payload     Json
+  createdAt   DateTime  @default(now())
+  deliveredAt DateTime?
+
+  @@index([deliveredAt, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Outputs
+// ---------------------------------------------------------------------------
+
+/// Immutable published output set for one survey. Reprocessing creates a new
+/// revision; approved revisions are never overwritten.
+model SurveyRevision {
+  id       String   @id @default(cuid())
+  surveyId String
+  runId    String
+  /// SurveyManifest JSON (validated against @warp-survey/contracts).
+  manifest Json
+  /// Measurement quality gate state: UNVERIFIED | PASS | FAIL.
+  measurementQualityState   String @default("UNVERIFIED")
+  visualizationQualityState String @default("UNVERIFIED")
+  publishedAt DateTime @default(now())
+
+  survey    Survey        @relation(fields: [surveyId], references: [id])
+  run       ProcessingRun @relation(fields: [runId], references: [id])
+  artifacts Artifact[]
+
+  baselineComparisons  Comparison[] @relation("baselineRevision")
+  candidateComparisons Comparison[] @relation("candidateRevision")
+  shareLinkRevisions   ShareLinkRevision[]
+
+  /// One revision per run: a replayed publication reuses it rather than
+  /// creating a second revision for the same processing attempt.
+  @@unique([runId])
+  @@index([surveyId])
+}
+
+model Artifact {
+  id             String   @id @default(cuid())
+  revisionId     String
+  /// ArtifactKind from contracts.
+  kind           String
+  storageKey     String
+  checksumSha256 String
+  sizeBytes      BigInt
+  contentType    String
+  /// CRS, bounds, resolution, band info, etc.
+  spatialMetadata Json?
+  /// Backend versions, container digest, config hash.
+  provenance     Json
+  createdAt      DateTime @default(now())
+
+  revision SurveyRevision @relation(fields: [revisionId], references: [id])
+
+  /// Artifacts are immutable: republishing the same object is a no-op.
+  @@unique([revisionId, storageKey])
+  @@index([revisionId])
+}
+
+// ---------------------------------------------------------------------------
+// Comparisons and reports
+// ---------------------------------------------------------------------------
+
+model Comparison {
+  id                  String  @id @default(cuid())
+  siteId              String
+  baselineRevisionId  String
+  candidateRevisionId String
+  /// ELEVATION_DIFFERENCING | M3C2.
+  method              String
+  /// Engineering-frame AOI bounds.
+  areaOfInterest      Json?
+  parameters          Json?
+  /// ComparisonManifest JSON once computed.
+  manifest            Json?
+  /// Exploratory comparisons are ineligible for engineering approval.
+  exploratory         Boolean  @default(true)
+  createdAt           DateTime @default(now())
+
+  site              Site           @relation(fields: [siteId], references: [id])
+  baselineRevision  SurveyRevision @relation("baselineRevision", fields: [baselineRevisionId], references: [id])
+  candidateRevision SurveyRevision @relation("candidateRevision", fields: [candidateRevisionId], references: [id])
+  runs              ProcessingRun[]
+  reportRevisions   ReportRevision[]
+
+  @@index([siteId])
+}
+
+enum ReportStatus {
+  DRAFT
+  APPROVED
+  SUPERSEDED
+  WITHDRAWN
+}
+
+/// Reproducible report revision. Approved reports are immutable; corrections
+/// create a new revision and mark the previous one SUPERSEDED.
+model ReportRevision {
+  id           String       @id @default(cuid())
+  comparisonId String
+  version      Int
+  status       ReportStatus @default(DRAFT)
+  /// Canonical report-data record every rendered value traces to.
+  reportData   Json
+  pdfStorageKey String?
+  authorUserId String
+  supersededById String?
+  createdAt    DateTime     @default(now())
+
+  comparison Comparison       @relation(fields: [comparisonId], references: [id])
+  author     User             @relation(fields: [authorUserId], references: [id])
+  decisions  ReviewDecision[]
+
+  @@unique([comparisonId, version])
+}
+
+enum ReviewOutcome {
+  APPROVED
+  REJECTED
+}
+
+model ReviewDecision {
+  id               String        @id @default(cuid())
+  reportRevisionId String
+  reviewerUserId   String
+  outcome          ReviewOutcome
+  comments         String?
+  decidedAt        DateTime      @default(now())
+
+  reportRevision ReportRevision @relation(fields: [reportRevisionId], references: [id])
+  reviewer       User           @relation(fields: [reviewerUserId], references: [id])
+
+  @@index([reportRevisionId])
+}
+
+// ---------------------------------------------------------------------------
+// Sharing, audit, sales
+// ---------------------------------------------------------------------------
+
+/// Expiring, revocable stakeholder access to specific published revisions.
+/// The token is stored hashed; every asset request rechecks scope + expiry.
+model ShareLink {
+  id              String    @id @default(cuid())
+  createdByUserId String
+  /// SHA-256 of the random token; the plaintext is shown once at creation.
+  tokenHash       String    @unique
+  label           String?
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
+
+  createdBy User                @relation(fields: [createdByUserId], references: [id])
+  revisions ShareLinkRevision[]
+}
+
+model ShareLinkRevision {
+  shareLinkId String
+  revisionId  String
+
+  shareLink ShareLink      @relation(fields: [shareLinkId], references: [id])
+  revision  SurveyRevision @relation(fields: [revisionId], references: [id])
+
+  @@id([shareLinkId, revisionId])
+}
+
+model AuditEvent {
+  id          String   @id @default(cuid())
+  orgId       String
+  actorUserId String?
+  action      String
+  targetType  String
+  targetId    String
+  /// Relevant revision or attempt identifiers.
+  context     Json?
+  createdAt   DateTime @default(now())
+
+  org   Organization @relation(fields: [orgId], references: [id])
+  actor User?        @relation(fields: [actorUserId], references: [id])
+
+  @@index([orgId, createdAt])
+}
+
+/// Marketing enquiry. Deliberately unrelated to User — a lead, not an account.
+model PilotRequest {
+  id              String   @id @default(cuid())
+  name            String
+  workEmail       String
+  company         String
+  useCase         String
+  siteCount       String
+  surveyFrequency String
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+/// Manually managed per-site commercial entitlement, separate from auth.
+model SiteSubscription {
+  id        String    @id @default(cuid())
+  orgId     String
+  siteId    String    @unique
+  status    String    @default("PILOT")
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+  notes     String?
+
+  org  Organization @relation(fields: [orgId], references: [id])
+  site Site         @relation(fields: [siteId], references: [id])
+
+  @@index([orgId])
+}

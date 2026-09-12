@@ -1,0 +1,17 @@
+{
+  "name": "warp-survey",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev": "pnpm -r run dev",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "prisma:migrate": "pnpm --filter @warp-survey/web run prisma:migrate",
+    "prisma:seed": "pnpm --filter @warp-survey/web run prisma:seed"
+  }
+}

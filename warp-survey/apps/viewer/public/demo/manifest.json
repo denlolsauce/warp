@@ -1,0 +1,55 @@
+{
+  "manifestVersion": 1,
+  "surveyId": "demo-survey-001",
+  "revisionId": "demo-revision-001",
+  "siteId": "demo-site-001",
+  "capturedAt": "2024-09-08T12:00:00Z",
+  "spatial": {
+    "horizontalCrs": "EPSG:4326",
+    "verticalDatum": {
+      "id": "ELLIPSOIDAL"
+    },
+    "unit": "metre",
+    "localOrigin": [0, 0, 0],
+    "transforms": [
+      {
+        "from": "ENGINEERING",
+        "to": "LOCAL_VIEWER",
+        "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        "uncertaintyMetres": null,
+        "derivation": "identity (demo data)"
+      }
+    ]
+  },
+  "bounds": {
+    "min": [-50, -10, -50],
+    "max": [50, 50, 50]
+  },
+  "artifacts": [],
+  "measurementQuality": {
+    "state": "UNVERIFIED"
+  },
+  "visualizationQuality": {
+    "state": "UNVERIFIED"
+  },
+  "provenance": {
+    "pipelineVersion": "demo",
+    "backendName": "demo",
+    "backendVersion": "1.0.0",
+    "containerDigest": null,
+    "configHash": "demo",
+    "packageVersions": {
+      "playcanvas": "2.21.3"
+    }
+  },
+  "viewer": {
+    "posterArtifactId": null,
+    "previewArtifactId": null,
+    "chunks": [],
+    "defaultCamera": {
+      "position": [100, 50, 100],
+      "target": [0, 0, 0]
+    },
+    "viewpoints": []
+  }
+}
