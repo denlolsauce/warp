@@ -17,9 +17,9 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "WARP — video to 3D",
+  title: "WARP — a new perspective on your site",
   description:
-    "WARP turns a two-minute phone video into a photorealistic 3D model — rotatable, zoomable, and small enough to sit on a product page.",
+    "Turn drone footage into shareable 3D Gaussian splats for engineering, construction and a shared understanding of your site.",
 };
 
 export default function RootLayout({

@@ -2,17 +2,43 @@ import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
   S3Client,
   UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-export const R2_BUCKET = process.env.R2_BUCKET_NAME as string;
+export const R2_BUCKET = process.env.R2_BUCKET_NAME ?? "";
+export const STORAGE_CONFIGURATION_MESSAGE =
+  "Uploads need object storage configured: set R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and either R2_ACCOUNT_ID or S3_ENDPOINT.";
 
-// R2's S3-compatible endpoint — https://developers.cloudflare.com/r2/api/s3/api/
+function hasValue(value: string | undefined): boolean {
+  return Boolean(value?.trim());
+}
+
+export function isStorageConfigured(): boolean {
+  return hasValue(process.env.R2_BUCKET_NAME) &&
+    hasValue(process.env.R2_ACCESS_KEY_ID) &&
+    hasValue(process.env.R2_SECRET_ACCESS_KEY) &&
+    (hasValue(process.env.R2_ACCOUNT_ID) || hasValue(process.env.S3_ENDPOINT));
+}
+
+function bucketName(): string {
+  if (!R2_BUCKET) throw new Error("R2_BUCKET_NAME is required for object storage");
+  return R2_BUCKET;
+}
+
+const customEndpoint = process.env.S3_ENDPOINT?.trim() || undefined;
+const accountEndpoint = process.env.R2_ACCOUNT_ID
+  ? `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
+  : undefined;
+
 export const s3 = new S3Client({
-  region: "auto",
-  endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  region: process.env.S3_REGION ?? (customEndpoint ? "us-east-1" : "auto"),
+  endpoint: customEndpoint ?? accountEndpoint,
+  forcePathStyle: process.env.S3_FORCE_PATH_STYLE === "true",
   credentials: {
     accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
@@ -28,7 +54,7 @@ export function videoStorageKey(tourId: string, videoId: string, filename: strin
 
 export async function createMultipartUpload(key: string, contentType: string): Promise<string> {
   const result = await s3.send(
-    new CreateMultipartUploadCommand({ Bucket: R2_BUCKET, Key: key, ContentType: contentType }),
+    new CreateMultipartUploadCommand({ Bucket: bucketName(), Key: key, ContentType: contentType }),
   );
   if (!result.UploadId) throw new Error("R2 did not return an UploadId");
   return result.UploadId;
@@ -36,7 +62,7 @@ export async function createMultipartUpload(key: string, contentType: string): P
 
 export async function getPartUploadUrl(key: string, uploadId: string, partNumber: number): Promise<string> {
   const command = new UploadPartCommand({
-    Bucket: R2_BUCKET,
+    Bucket: bucketName(),
     Key: key,
     UploadId: uploadId,
     PartNumber: partNumber,
@@ -56,7 +82,7 @@ export async function completeMultipartUpload(
 ): Promise<void> {
   await s3.send(
     new CompleteMultipartUploadCommand({
-      Bucket: R2_BUCKET,
+      Bucket: bucketName(),
       Key: key,
       UploadId: uploadId,
       MultipartUpload: {
@@ -69,5 +95,19 @@ export async function completeMultipartUpload(
 }
 
 export async function abortMultipartUpload(key: string, uploadId: string): Promise<void> {
-  await s3.send(new AbortMultipartUploadCommand({ Bucket: R2_BUCKET, Key: key, UploadId: uploadId }));
+  await s3.send(new AbortMultipartUploadCommand({ Bucket: bucketName(), Key: key, UploadId: uploadId }));
+}
+
+export async function getObjectSize(key: string): Promise<number | null> {
+  const result = await s3.send(new HeadObjectCommand({ Bucket: bucketName(), Key: key }));
+  return result.ContentLength ?? null;
+}
+
+export async function getSignedObjectUrl(key: string): Promise<string | null> {
+  if (!isStorageConfigured()) return null;
+  return getSignedUrl(s3, new GetObjectCommand({ Bucket: bucketName(), Key: key }), { expiresIn: 900 });
+}
+
+export async function deleteStorageObject(key: string): Promise<void> {
+  await s3.send(new DeleteObjectCommand({ Bucket: bucketName(), Key: key }));
 }
