@@ -1,0 +1,36 @@
+{
+	"version": 1,
+	"inference": {
+		"run": {
+			"detectorVersion": 4,
+			"framework": "nextjs",
+			"workspacePath": null,
+			"appPaths": [
+				"apps/web",
+				"apps/viewer"
+			]
+		}
+	},
+	"ports": {
+		"preview": 3000,
+		"additional": {
+			"viewer": 5173
+		}
+	},
+	"services": [],
+	"scripts": {
+		"setup": {
+			"enabled": true,
+			"command": null
+		},
+		"run": {
+			"enabled": true,
+			"command": "pnpm dev"
+		},
+		"archive": {
+			"enabled": true,
+			"command": null
+		}
+	},
+	"mcpServers": []
+}
