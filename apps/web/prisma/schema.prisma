@@ -54,6 +54,13 @@ enum StageStatus {
   FAILED
 }
 
+enum UploadSessionStatus {
+  ACTIVE
+  COMPLETING
+  COMPLETED
+  ABORTED
+}
+
 enum AssetKind {
   PLY
   SOG
@@ -69,9 +76,10 @@ model User {
   image         String?
   createdAt     DateTime  @default(now())
 
-  accounts    Account[]
-  sessions    Session[]
-  memberships Membership[]
+  accounts       Account[]
+  sessions       Session[]
+  memberships    Membership[]
+  uploadSessions UploadSession[]
 }
 
 // Auth.js (@auth/prisma-adapter) standard schema — required table shapes,
@@ -140,18 +148,46 @@ model Membership {
 }
 
 model Product {
-  id        String        @id @default(cuid())
-  orgId     String
-  name      String
-  status    ProductStatus @default(DRAFT)
-  createdAt DateTime      @default(now())
+  id              String        @id @default(cuid())
+  orgId           String
+  name            String
+  description     String        @default("")
+  location        String?
+  captureProfile  String        @default("product")
+  shareToken      String?       @unique
+  uploadSessionId String?       @unique
+  status          ProductStatus @default(DRAFT)
+  createdAt       DateTime      @default(now())
 
-  org    Organization  @relation(fields: [orgId], references: [id])
-  video  ProductVideo?
-  jobs   Job[]
-  assets Asset[]
+  org           Organization   @relation(fields: [orgId], references: [id])
+  video         ProductVideo?
+  jobs          Job[]
+  assets        Asset[]
+  uploadSession UploadSession? @relation(fields: [uploadSessionId], references: [id], onDelete: SetNull)
 
   @@index([orgId])
+}
+
+model UploadSession {
+  id                 String              @id @default(cuid())
+  userId             String
+  uploadId           String              @unique
+  storageKey         String              @unique
+  filename           String
+  contentType        String
+  expectedSizeBytes  Int?
+  completedSizeBytes Int?
+  status             UploadSessionStatus @default(ACTIVE)
+  completedAt        DateTime?
+  consumedAt         DateTime?
+  expiresAt          DateTime
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product?
+
+  @@index([userId, status])
 }
 
 // One video per product for v1 (CLAUDE.md: "uploads a 2-4 minute video of a
