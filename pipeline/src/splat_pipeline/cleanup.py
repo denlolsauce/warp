@@ -45,6 +45,18 @@ from .subprocess_utils import run_command
 
 logger = logging.getLogger(__name__)
 
+CAPTURE_PROFILES = ("product", "drone")
+
+
+def validate_capture_profile(capture_profile: str) -> str:
+    if capture_profile not in CAPTURE_PROFILES:
+        expected = ", ".join(CAPTURE_PROFILES)
+        raise PipelineError(
+            "cleanup:profile",
+            f"unsupported capture profile {capture_profile!r}; expected one of: {expected}",
+        )
+    return capture_profile
+
 
 # ---------------------------------------------------------------------------
 # Step 1: SAM 2 segmentation -> background pruning
@@ -773,7 +785,43 @@ def find_trained_ply(out_dir: Path) -> Path:
     return newest
 
 
-def run_cleanup(workdir: Path, segmentation_backend: SegmentationBackend | None = None) -> Path:
+def cleanup_drone_scene(workdir: Path) -> Path:
+    """Prune obvious floaters while preserving the full outdoor reconstruction.
+
+    Drone footage has no assumed foreground object or support plane. COLMAP's
+    world scale is also arbitrary, so retain its coordinates for scene framing.
+    """
+    trained_ply_path = find_trained_ply(workdir / "out")
+    cleaned_path = workdir / "cleaned.ply"
+    ply, positions = load_ply_positions(trained_ply_path)
+    opacities = load_ply_opacity(ply)
+    scales = load_ply_scale(ply)
+    keep = prune_floaters(positions, opacities, scales)
+
+    if keep.sum() < 3:
+        raise PipelineError(
+            "cleanup",
+            f"only {int(keep.sum())} gaussians survived opacity/scale/density pruning — "
+            "the trained drone scene may be mostly noise",
+        )
+
+    write_ply_subset(ply, keep, cleaned_path)
+    logger.info(
+        "cleanup:drone: %d/%d gaussians retained; preserved the reconstruction coordinate frame -> %s",
+        int(keep.sum()), len(keep), cleaned_path,
+    )
+    return cleaned_path
+
+
+def run_cleanup(
+    workdir: Path,
+    segmentation_backend: SegmentationBackend | None = None,
+    capture_profile: str = "product",
+) -> Path:
+    capture_profile = validate_capture_profile(capture_profile)
+    if capture_profile == "drone":
+        return cleanup_drone_scene(workdir)
+
     frames_dir = workdir / "frames"
     sparse_dir = workdir / "sparse" / "0"
     out_dir = workdir / "out"
