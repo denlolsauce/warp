@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
+from splat_pipeline import cleanup as cleanup_module
 from colmap_fixtures import build_synthetic_reconstruction
 from ply_fixtures import write_gaussian_ply_at_positions
 from splat_pipeline.cleanup import (
@@ -27,6 +28,49 @@ from splat_pipeline.cleanup import (
 )
 from splat_pipeline.errors import PipelineError
 from splat_pipeline.plysplit import load_ply_positions
+
+
+def test_drone_cleanup_prunes_floaters_without_isolating_or_transforming_scene(monkeypatch, tmp_path: Path):
+    workdir = tmp_path / "drone-job"
+    out_dir = workdir / "out"
+    out_dir.mkdir(parents=True)
+    trained_path = out_dir / "trained.ply"
+    positions = [
+        (100.0, 200.0, 5.0),
+        (101.0, 200.0, 5.0),
+        (102.0, 200.0, 5.0),
+        (900.0, 850.0, 120.0),
+        (901.0, 851.0, 121.0),
+    ]
+    write_gaussian_ply_at_positions(trained_path, positions, opacity_logit=2.0)
+
+    def keep_context(points, opacities, scales):
+        assert len(points) == 5
+        assert len(opacities) == len(scales) == 5
+        return np.array([True, False, True, True, True])
+
+    def product_only_step(*_args, **_kwargs):
+        pytest.fail("drone cleanup must not run product-only removal or transforms")
+
+    monkeypatch.setattr(cleanup_module, "prune_floaters", keep_context)
+    for name in (
+        "fit_plane_ransac",
+        "largest_connected_component",
+        "dilate_around_product",
+        "solidify_opacity_delta",
+        "apply_alignment_transform",
+    ):
+        monkeypatch.setattr(cleanup_module, name, product_only_step)
+
+    cleaned_path = cleanup_module.run_cleanup(workdir, capture_profile="drone")
+    _, cleaned_positions = load_ply_positions(cleaned_path)
+
+    np.testing.assert_array_equal(cleaned_positions, np.asarray([positions[0], *positions[2:]]))
+
+
+def test_drone_cleanup_rejects_unknown_capture_profile(tmp_path: Path):
+    with pytest.raises(PipelineError, match="unsupported capture profile"):
+        cleanup_module.run_cleanup(tmp_path, capture_profile="construction")
 
 HAS_SPLAT_TRANSFORM = shutil.which("splat-transform") is not None
 
