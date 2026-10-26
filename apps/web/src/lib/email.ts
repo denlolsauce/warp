@@ -11,12 +11,24 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character] ?? character);
+}
+
 export async function sendProductReadyEmail(to: string, productName: string, productUrl: string): Promise<void> {
+  const safeName = escapeHtml(productName);
+  const safeUrl = escapeHtml(productUrl);
   await transporter.sendMail({
     from: process.env.EMAIL_FROM,
     to,
     subject: `Your 3D model of "${productName}" is ready`,
     text: `Your 3D model of "${productName}" has finished processing. View it here: ${productUrl}`,
-    html: `<p>Your 3D model of "<strong>${productName}</strong>" has finished processing.</p><p><a href="${productUrl}">View it</a></p>`,
+    html: `<p>Your 3D model of "<strong>${safeName}</strong>" has finished processing.</p><p><a href="${safeUrl}">View it</a></p>`,
   });
 }
