@@ -22,8 +22,19 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://portal:portal_dev@lo
 
 def _database_available() -> bool:
     try:
-        with psycopg.connect(DATABASE_URL, connect_timeout=2):
-            return True
+        with psycopg.connect(DATABASE_URL, connect_timeout=2) as conn:
+            organization_table, capture_profile_column = conn.execute(
+                """
+                SELECT to_regclass('"Organization"') IS NOT NULL,
+                       EXISTS (
+                           SELECT 1 FROM information_schema.columns
+                           WHERE table_schema = current_schema()
+                             AND table_name = 'Product'
+                             AND column_name = 'captureProfile'
+                       )
+                """
+            ).fetchone()
+            return organization_table and capture_profile_column
     except Exception:
         return False
 
@@ -34,7 +45,9 @@ def _database_available() -> bool:
 # this machine's own recurring Docker Desktop flakiness. Also requires the
 # apps/web/prisma schema's Organization/Product/Job/JobStageRun migration to
 # already be applied — see CLAUDE.md's Data model section.
-pytestmark = pytest.mark.skipif(not _database_available(), reason="Postgres not reachable at DATABASE_URL")
+requires_database = pytest.mark.skipif(
+    not _database_available(), reason="Prisma schema with captureProfile not available at DATABASE_URL"
+)
 
 
 @pytest.fixture
@@ -81,17 +94,32 @@ def seeded_product():
         conn.execute('DELETE FROM "User" WHERE id = %s', (user_id,))
 
 
+@requires_database
 def test_fetch_video_returns_the_seeded_video(seeded_product):
     video = fetch_video(DATABASE_URL, seeded_product["product_id"])
     assert video.storage_key == "videos/test/product.mp4"
     assert video.duration_sec == 90.0
+    assert video.capture_profile == "product"
 
 
+@requires_database
+def test_fetch_video_returns_drone_capture_profile(seeded_product):
+    product_id = seeded_product["product_id"]
+    with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
+        conn.execute('UPDATE "Product" SET "captureProfile" = %s WHERE "id" = %s', ("drone", product_id))
+
+    video = fetch_video(DATABASE_URL, product_id)
+
+    assert video.capture_profile == "drone"
+
+
+@requires_database
 def test_fetch_video_raises_for_a_product_with_no_video():
     with pytest.raises(ValueError):
         fetch_video(DATABASE_URL, f"nonexistent-{uuid.uuid4()}")
 
 
+@requires_database
 def test_start_job_sets_running_and_started_at(seeded_product):
     start_job(DATABASE_URL, seeded_product["job_id"])
     with psycopg.connect(DATABASE_URL) as conn:
@@ -102,6 +130,7 @@ def test_start_job_sets_running_and_started_at(seeded_product):
     assert started_at is not None
 
 
+@requires_database
 def test_start_stage_then_finish_success_records_metrics(seeded_product):
     job_id = seeded_product["job_id"]
     start_stage(DATABASE_URL, job_id, "INGEST", attempt=1)
@@ -125,6 +154,7 @@ def test_start_stage_then_finish_success_records_metrics(seeded_product):
     assert finished_at is not None
 
 
+@requires_database
 def test_start_stage_then_finish_failure_records_error_message(seeded_product):
     job_id = seeded_product["job_id"]
     start_stage(DATABASE_URL, job_id, "POSE_ESTIMATION", attempt=1)
@@ -139,6 +169,7 @@ def test_start_stage_then_finish_failure_records_error_message(seeded_product):
     assert error_message == "only 62% of frames registered"
 
 
+@requires_database
 def test_retried_stage_gets_a_new_row_at_the_next_attempt(seeded_product):
     job_id = seeded_product["job_id"]
     start_stage(DATABASE_URL, job_id, "TRAINING", attempt=1)
@@ -151,6 +182,7 @@ def test_retried_stage_gets_a_new_row_at_the_next_attempt(seeded_product):
     assert [(r.attempt, r.status) for r in training_runs] == [(1, "FAILED"), (2, "SUCCEEDED")]
 
 
+@requires_database
 def test_update_product_status_updates_product_row(seeded_product):
     update_product_status(DATABASE_URL, seeded_product["product_id"], "PROCESSING")
     with psycopg.connect(DATABASE_URL) as conn:
@@ -160,6 +192,7 @@ def test_update_product_status_updates_product_row(seeded_product):
     assert status == "PROCESSING"
 
 
+@requires_database
 def test_mark_job_failed_directly_sets_terminal_state_on_both_rows(seeded_product):
     mark_job_failed_directly(DATABASE_URL, seeded_product["job_id"], seeded_product["product_id"], "boom")
     with psycopg.connect(DATABASE_URL) as conn:
@@ -192,6 +225,9 @@ def test_resume_stage_skips_succeeded_stages():
 
 def test_resume_stage_uses_the_latest_attempt_not_the_first():
     runs = [
+        StageRun(stage="INGEST", status="SUCCEEDED", attempt=1),
+        StageRun(stage="FRAME_EXTRACTION", status="SUCCEEDED", attempt=1),
+        StageRun(stage="POSE_ESTIMATION", status="SUCCEEDED", attempt=1),
         StageRun(stage="TRAINING", status="FAILED", attempt=1),
         StageRun(stage="TRAINING", status="SUCCEEDED", attempt=2),
     ]
