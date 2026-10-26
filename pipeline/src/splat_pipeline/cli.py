@@ -5,7 +5,7 @@ import logging
 import sys
 from pathlib import Path
 
-from .cleanup import Sam2SegmentationBackend, run_cleanup
+from .cleanup import CAPTURE_PROFILES, Sam2SegmentationBackend, run_cleanup
 from .compress import run_compress
 from .errors import PipelineError
 from .extract import run_extract
@@ -67,7 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--sh-degree", type=int, default=None, help="Override: SH degree")
 
     cleanup_parser = subparsers.add_parser(
-        "cleanup", help="Segment, remove the support surface, prune floaters, recentre/align/scale"
+        "cleanup", help="Clean a product capture or prune floaters from a drone scene"
     )
     cleanup_parser.add_argument(
         "--workdir",
@@ -80,6 +80,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="SAM 2 checkpoint path; background pruning is skipped if omitted",
+    )
+    cleanup_parser.add_argument(
+        "--capture-profile",
+        choices=CAPTURE_PROFILES,
+        default="product",
+        help="product isolates and normalizes one object; drone preserves outdoor context and coordinates",
     )
 
     compress_parser = subparsers.add_parser("compress", help="Convert cleaned.ply to SOG")
@@ -121,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
             run_train(args.workdir, _train_config_override(args))
         elif args.command == "cleanup":
             backend = Sam2SegmentationBackend(checkpoint_path=args.sam2_checkpoint) if args.sam2_checkpoint else None
-            run_cleanup(args.workdir, backend)
+            run_cleanup(args.workdir, backend, capture_profile=args.capture_profile)
         elif args.command == "compress":
             run_compress(args.workdir)
     except PipelineError as error:
