@@ -8,7 +8,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "tsx prisma/seed.ts"
+    "prisma:seed": "tsx prisma/seed.ts",
+    "test": "tsx --env-file=.env --test src/lib/*.test.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",

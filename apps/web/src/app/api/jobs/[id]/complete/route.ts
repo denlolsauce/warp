@@ -1,75 +1,107 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { sendProductReadyEmail } from "@/lib/email";
+import { prisma } from "@/lib/prisma";
+import { parseWorkerCompletionInput } from "@/lib/project-types";
 
-interface AssetPayload {
-  key: string;
-  url: string;
-  sizeBytes: number;
-  contentHash: string;
+function validWorkerSecret(value: string | null): boolean {
+  const expected = process.env.WORKER_CALLBACK_SECRET;
+  if (!expected || !value) return false;
+  const expectedBuffer = Buffer.from(expected);
+  const providedBuffer = Buffer.from(value);
+  return expectedBuffer.length === providedBuffer.length && timingSafeEqual(expectedBuffer, providedBuffer);
 }
 
-// Called by the pipeline worker (pipeline/src/splat_pipeline/worker.py)
-// when a job finishes — not the browser, so it authenticates with a shared
-// secret rather than a user session. Owns every success-path side effect
-// (Job/Product terminal status, Asset rows, the ready email) so there's one
-// place responsible for all of them, matching db.py's own comment about why
-// the worker doesn't write these directly.
+function matchesAssetKey(key: string, productId: string, extension: "sog" | "ply", contentHash: string): boolean {
+  return key === `products/${productId}/${contentHash}.${extension}` && /^[a-f0-9]{64}$/i.test(contentHash);
+}
+
 export async function POST(request: Request, { params }: { params: { id: string } }) {
-  const secret = request.headers.get("x-worker-secret");
-  if (!secret || secret !== process.env.WORKER_CALLBACK_SECRET) {
+  if (!validWorkerSecret(request.headers.get("x-worker-secret"))) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const { status, assets, errorMessage } = (await request.json()) as {
-    status?: "success" | "failure";
-    assets?: Record<"sog" | "ply", AssetPayload>;
-    errorMessage?: string;
-  };
-  if (status !== "success" && status !== "failure") {
-    return NextResponse.json({ error: "status must be 'success' or 'failure'" }, { status: 400 });
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "request body must be JSON" }, { status: 400 });
+  }
+  const completion = parseWorkerCompletionInput(body);
+  if (!completion) {
+    return NextResponse.json({ error: "invalid completion payload" }, { status: 400 });
   }
 
-  const job = await prisma.job.update({
+  const job = await prisma.job.findUnique({
     where: { id: params.id },
-    data: {
-      status: status === "success" ? "SUCCEEDED" : "FAILED",
-      finishedAt: new Date(),
-      errorMessage: errorMessage ?? null,
-    },
     include: { product: { include: { org: { include: { memberships: { include: { user: true } } } } } } },
   });
+  if (!job) return NextResponse.json({ error: "job not found" }, { status: 404 });
+  if (job.status === "SUCCEEDED" || job.status === "FAILED") {
+    return NextResponse.json({ ok: true, alreadyTerminal: true, status: job.status });
+  }
 
-  if (status === "success") {
-    if (!assets?.sog || !assets?.ply) {
-      return NextResponse.json({ error: "assets.sog and assets.ply are required on success" }, { status: 400 });
+  if (completion.status === "success") {
+    if (
+      !matchesAssetKey(completion.assets.sog.key, job.productId, "sog", completion.assets.sog.contentHash) ||
+      !matchesAssetKey(completion.assets.ply.key, job.productId, "ply", completion.assets.ply.contentHash)
+    ) {
+      return NextResponse.json({ error: "asset keys do not match the job product" }, { status: 400 });
     }
+  }
 
-    const product = await prisma.product.update({
-      where: { id: job.productId },
-      data: { status: "READY" },
+  const outcome = await prisma.$transaction(async (tx) => {
+    const changed = await tx.job.updateMany({
+      where: { id: job.id, status: { in: ["QUEUED", "RUNNING"] } },
+      data: {
+        status: completion.status === "success" ? "SUCCEEDED" : "FAILED",
+        finishedAt: new Date(),
+        errorMessage: completion.status === "failure" ? completion.errorMessage : null,
+      },
     });
-    await prisma.asset.createMany({
-      data: [
-        { productId: product.id, kind: "SOG", storageKey: assets.sog.key, sizeBytes: assets.sog.sizeBytes, contentHash: assets.sog.contentHash },
-        { productId: product.id, kind: "PLY", storageKey: assets.ply.key, sizeBytes: assets.ply.sizeBytes, contentHash: assets.ply.contentHash },
-      ],
-    });
+    if (changed.count !== 1) return { accepted: false };
 
-    // The product is already ready at this point — a broken SMTP config or
-    // transient send failure is a notification problem, not a reason to
-    // fail this request and have the worker report (and record) the job as
-    // failed when it actually succeeded.
-    try {
-      const productUrl = `${process.env.NEXT_PUBLIC_APP_URL}/products/${product.id}`;
-      for (const membership of job.product.org.memberships) {
-        await sendProductReadyEmail(membership.user.email, product.name, productUrl);
+    if (completion.status === "success") {
+      await tx.asset.createMany({
+        data: [
+          {
+            productId: job.productId,
+            kind: "SOG",
+            storageKey: completion.assets.sog.key,
+            sizeBytes: completion.assets.sog.sizeBytes,
+            contentHash: completion.assets.sog.contentHash,
+          },
+          {
+            productId: job.productId,
+            kind: "PLY",
+            storageKey: completion.assets.ply.key,
+            sizeBytes: completion.assets.ply.sizeBytes,
+            contentHash: completion.assets.ply.contentHash,
+          },
+        ],
+      });
+      await tx.product.update({ where: { id: job.productId }, data: { status: "READY" } });
+    } else {
+      await tx.product.update({ where: { id: job.productId }, data: { status: "FAILED" } });
+    }
+    return { accepted: true };
+  });
+
+  if (!outcome.accepted) {
+    const current = await prisma.job.findUnique({ where: { id: job.id }, select: { status: true } });
+    return NextResponse.json({ ok: true, alreadyTerminal: true, status: current?.status ?? null });
+  }
+
+  if (completion.status === "success") {
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+    const projectUrl = `${appUrl}/projects/${job.productId}`;
+    for (const membership of job.product.org.memberships) {
+      try {
+        await sendProductReadyEmail(membership.user.email, job.product.name, projectUrl);
+      } catch (error) {
+        console.error("failed to send product-ready email", error);
       }
-    } catch (error) {
-      console.error("failed to send product-ready email", error);
     }
-  } else {
-    await prisma.product.update({ where: { id: job.productId }, data: { status: "FAILED" } });
   }
 
   return NextResponse.json({ ok: true });
