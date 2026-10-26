@@ -8,9 +8,12 @@
   "packageManager": "pnpm@9.15.9",
   "scripts": {
     "build": "pnpm -r run build",
-    "dev": "pnpm -r run dev",
+    "dev": "pnpm -r --parallel run dev",
     "typecheck": "pnpm -r run typecheck",
     "prisma:migrate": "pnpm --filter @portal/web run prisma:migrate",
-    "prisma:seed": "pnpm --filter @portal/web run prisma:seed"
+    "prisma:seed": "pnpm --filter @portal/web run prisma:seed",
+    "setup:local": "bash scripts/setup-local.sh",
+    "test": "pnpm --filter @portal/web test",
+    "test:pipeline": "cd pipeline && UV_CACHE_DIR=../.cache/uv uv run --locked pytest -q"
   }
 }
