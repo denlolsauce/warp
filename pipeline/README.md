@@ -1,11 +1,28 @@
 # Video → Splat
 
-How to turn a product video into a viewable Gaussian splat, end to end. This
-covers the manual CLI path (`splat-pipeline <stage> ...`), which is what you
-want for a one-off run or when debugging — the Redis worker (`worker.py`)
-wraps the same stages for production use once R2/DB/Redis are configured.
+How to turn product or drone footage into a viewable Gaussian splat, end to
+end. The manual CLI path (`splat-pipeline <stage> ...`) is useful for one-off
+runs and debugging; the Redis worker wraps the same stages for production.
+Products use object-isolating cleanup by default. Drone captures select
+`captureProfile="drone"` on the Product and preserve the surrounding scene.
 
 ## 1. Filming
+
+### Drone / construction scenes
+
+- Capture overlapping, slow passes over the whole site from multiple heights,
+  including oblique views of façades and ground-level context. Keep the site
+  in view across adjacent frames; one high-altitude orbit leaves vertical
+  surfaces under-observed.
+- Lock exposure, focus, and white balance when possible. Avoid fast yaw,
+  aggressive digital stabilization, and motion blur; these are especially
+  damaging to camera registration.
+- The drone profile retains the full scene and its reconstruction
+  coordinates. Monocular SfM scale is arbitrary: these coordinates are not
+  metres, GPS coordinates, or survey-grade measurements. GPS/IMU
+  georeferencing and measurement calibration are not implemented.
+
+### Product captures
 
 - Single product, on a plain background, filling most of the frame.
 - Exposure and focus **locked** before you start recording (Samsung: Pro
@@ -45,9 +62,9 @@ generic "just install COLMAP" advice will bite you here:
 | **COLMAP 3.12.6, not newer** | COLMAP ≥4.0 renamed CLI flags and changed its feature-matching database schema in a way GLOMAP 1.2.0 can't read (`SQL logic error`). There is no newer GLOMAP release. If `colmap --version` reports 4.x, you have the wrong build — get 3.12.6 specifically and make sure it resolves first on `PATH`. |
 | `glomap` | 1.2.0. |
 | A **FAISS-format** vocab tree | COLMAP switched from FLANN to FAISS in May 2025. Any vocab tree file predating that (including most publicly distributed ones, e.g. `vocab_tree_flickr100K_words32K.bin`) fails to load on a modern COLMAP build (`Check failed: file_version == 1`). Build your own locally instead: `colmap vocab_tree_builder --database_path <db> --vocab_tree_path <out.bin> --num_visual_words 256 --num_threads 1` against a completed `sfm` run's `db.db` — a few hundred words is plenty for a single-product capture, and this only needs doing once. |
-| Node + `@playcanvas/splat-transform` | `npm i -g @playcanvas/splat-transform`. Used for PLY→SOG compression *and* for `cleanup.py`'s final recentre/align/scale transform — see that module's docstring for why rotation is never hand-rolled in Python here. |
+| Node + `@playcanvas/splat-transform` | Used for PLY→SOG compression and product-only coordinate transforms. Drone cleanup does not transform coordinates. Pin the CLI version in the worker image. |
 | A separate Python venv for `gsplat_trainer` | gsplat's prebuilt wheels are cp310-only, incompatible with this package's own venv. Needs `torch` with CUDA. Point `SPLAT_GSPLAT_PYTHON` at its `python.exe`. |
-| A SAM 2 checkpoint (optional) | `cleanup.py`'s background-pruning step. Point `SAM2_CHECKPOINT` at a downloaded checkpoint; without it, `cleanup` skips background pruning (logs a warning) rather than failing — everything downstream still runs. **Not verified against a real checkpoint in this repo's dev environment** — see `Sam2SegmentationBackend`'s docstring before trusting it blind. |
+| A SAM 2 checkpoint (optional, product profile only) | Product cleanup's background-pruning step. Point `SAM2_CHECKPOINT` at a downloaded checkpoint; without it, product cleanup skips background pruning (logs a warning) rather than failing. Drone cleanup does not load SAM 2. **Not verified against a real checkpoint in this repo's dev environment** — see `Sam2SegmentationBackend`'s docstring before trusting it blind. |
 | A *second*, separate venv for PPISP (optional) | `TrainConfig.use_ppisp=True`'s photometric correction. A second clone of gsplat-src with NVIDIA's PPISP hand-patched into `simple_trainer.py` (see that file's `use_ppisp`/`cfg.use_ppisp` additions), kept fully isolated from the default `SPLAT_GSPLAT_PYTHON` venv so an experimental add-on can never break the proven default training path. Point `SPLAT_GSPLAT_PPISP_PYTHON` at its `python.exe`. Building PPISP's CUDA extension needs an actual CUDA Toolkit (`nvcc`) *and* MSVC Build Tools — neither is needed anywhere else in this pipeline, since everything else uses pre-built wheels. |
 
 **Setting up the PPISP venv from scratch**, once `nvcc` and MSVC are installed:
@@ -73,6 +90,36 @@ GLOMAP/gsplat paths (see `DEFAULT_GSPLAT_PYTHON` / `DEFAULT_VOCAB_TREE` /
 installed rather than re-discovering the right paths every run. The manual
 CLI commands below don't call `configure_tool_paths()` automatically, so
 either call it yourself first or set the equivalent env vars/`PATH` by hand.
+
+### Worker GPU deployment checklist
+
+- Build the worker environment from this directory with the checked-in
+  `uv.lock` (`uv sync --frozen --no-dev`) using Python 3.11. Keep job workdirs
+  on fast local scratch with enough capacity for extracted frames, the COLMAP
+  database, and training artifacts; set `SPLAT_WORKDIR_ROOT` explicitly.
+- Install `ffmpeg`/`ffprobe`, COLMAP **3.12.6**, GLOMAP **1.2.0**, and a
+  FAISS-format vocabulary tree. Put the binaries on `PATH` or set
+  `SPLAT_EXTRA_PATH_DIRS` and `SPLAT_VOCAB_TREE` to paths inside the image.
+- Install Node and `@playcanvas/splat-transform` at a pinned version. Check
+  `splat-transform --help` during image build; compression validates its CLI
+  markers before use.
+- Provide a CUDA-capable NVIDIA GPU and a separate Python 3.10 training
+  environment with CUDA-enabled PyTorch and the gsplat `gsplat_trainer`
+  module. Set `SPLAT_GSPLAT_PYTHON` to that environment's interpreter. The
+  existing setup notes use CUDA 12.1 wheels; pin the driver, PyTorch/CUDA
+  build, gsplat checkout commit, and package versions together in the
+  deployed image. These components are external to `uv.lock` today, so the
+  Python lockfile alone is not a reproducible training environment.
+- Before accepting jobs, verify `colmap --version`, `glomap --help`,
+  `splat-transform --help`,
+  `"$SPLAT_GSPLAT_PYTHON" -m gsplat_trainer --help`, and
+  `"$SPLAT_GSPLAT_PYTHON" -c 'import torch; assert torch.cuda.is_available()'`.
+  Set database, Redis, R2, public URL, and callback-secret variables in the
+  deployment secret store; never bake credentials into the image.
+- Run `uv run --frozen splat-worker` as the queue consumer. The worker reads
+  `Product.captureProfile`; the backend must migrate that string field with
+  default `product` before deploying this worker version. `SAM2_CHECKPOINT`
+  is optional and only used for product captures.
 
 ## 3. Running the pipeline
 
