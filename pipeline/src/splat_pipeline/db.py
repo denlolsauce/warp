@@ -27,6 +27,7 @@ STAGE_ORDER = [
 class VideoRecord:
     storage_key: str
     duration_sec: float | None
+    capture_profile: str = "product"
 
 
 @dataclass(frozen=True)
@@ -49,13 +50,19 @@ def _connect(database_url: str) -> psycopg.Connection:
 def fetch_video(database_url: str, product_id: str) -> VideoRecord:
     with _connect(database_url) as conn:
         row = conn.execute(
-            'SELECT "storageKey", "durationSec" FROM "ProductVideo" WHERE "productId" = %s',
+            'SELECT v."storageKey", v."durationSec", p."captureProfile" '
+            'FROM "ProductVideo" v JOIN "Product" p ON p."id" = v."productId" '
+            'WHERE v."productId" = %s',
             (product_id,),
         ).fetchone()
     if row is None:
         raise ValueError(f"no video found for product {product_id}")
-    storage_key, duration_sec = row
-    return VideoRecord(storage_key=storage_key, duration_sec=duration_sec)
+    storage_key, duration_sec, capture_profile = row
+    return VideoRecord(
+        storage_key=storage_key,
+        duration_sec=duration_sec,
+        capture_profile=capture_profile,
+    )
 
 
 def fetch_stage_runs(database_url: str, job_id: str) -> list[StageRun]:
