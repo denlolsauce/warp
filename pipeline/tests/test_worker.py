@@ -1,3 +1,7 @@
+from dataclasses import replace
+from types import SimpleNamespace
+
+import splat_pipeline.worker as worker_module
 from splat_pipeline.storage import UploadedAsset
 from splat_pipeline.worker import WorkerConfig, call_completion_callback
 
@@ -58,3 +62,49 @@ def test_call_completion_callback_failure_posts_truncated_error_message(monkeypa
     assert captured["json"]["status"] == "failure"
     assert len(captured["json"]["errorMessage"]) == 2000
     assert "assets" not in captured["json"]
+
+
+def test_process_job_routes_drone_profile_to_cleanup_without_sam2(monkeypatch, tmp_path):
+    monkeypatch.setenv("SPLAT_WORKDIR_ROOT", str(tmp_path))
+    monkeypatch.setattr(worker_module, "fetch_stage_runs", lambda *_args: [])
+    monkeypatch.setattr(
+        worker_module,
+        "fetch_video",
+        lambda *_args: SimpleNamespace(storage_key="video.mp4", capture_profile="drone"),
+    )
+    monkeypatch.setattr(worker_module, "start_job", lambda *_args: None)
+    monkeypatch.setattr(worker_module, "update_product_status", lambda *_args: None)
+    monkeypatch.setattr(worker_module, "make_s3_client", lambda *_args: object())
+
+    def fake_download(_s3, _bucket, _key, path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+
+    monkeypatch.setattr(worker_module, "download_video", fake_download)
+
+    def fail_to_construct_sam2(**_kwargs):
+        raise AssertionError("drone cleanup must not load SAM 2")
+
+    monkeypatch.setattr(
+        worker_module,
+        "Sam2SegmentationBackend",
+        fail_to_construct_sam2,
+    )
+    for stage_function in ("run_ingest", "run_extract", "run_sfm", "run_train", "run_compress"):
+        monkeypatch.setattr(worker_module, stage_function, lambda *_args, **_kwargs: None)
+
+    cleanup_calls = []
+    monkeypatch.setattr(
+        worker_module,
+        "run_cleanup",
+        lambda workdir, backend, capture_profile: cleanup_calls.append((backend, capture_profile)),
+    )
+    monkeypatch.setattr(worker_module, "start_stage", lambda *_args: None)
+    monkeypatch.setattr(worker_module, "finish_stage_success", lambda *_args: None)
+    monkeypatch.setattr(worker_module, "finish_stage_failure", lambda *_args: None)
+    monkeypatch.setattr(worker_module, "upload_product_outputs", lambda *_args: {})
+    monkeypatch.setattr(worker_module, "call_completion_callback", lambda *_args, **_kwargs: None)
+
+    worker_module.process_job("job-1", "product-1", replace(_config(), sam2_checkpoint="checkpoint.pt"))
+
+    assert cleanup_calls == [(None, "drone")]
