@@ -8,7 +8,7 @@ from pathlib import Path
 import redis
 import requests
 
-from .cleanup import Sam2SegmentationBackend, run_cleanup
+from .cleanup import Sam2SegmentationBackend, run_cleanup, validate_capture_profile
 from .cli import REPO_ROOT
 from .compress import run_compress
 from .db import (
@@ -179,6 +179,7 @@ def process_job(job_id: str, product_id: str, config: WorkerConfig) -> None:
 
     try:
         video = fetch_video(config.database_url, product_id)
+        capture_profile = validate_capture_profile(video.capture_profile)
         start_job(config.database_url, job_id)
         update_product_status(config.database_url, product_id, "PROCESSING")
 
@@ -189,7 +190,7 @@ def process_job(job_id: str, product_id: str, config: WorkerConfig) -> None:
 
         segmentation_backend = (
             Sam2SegmentationBackend(checkpoint_path=Path(config.sam2_checkpoint))
-            if config.sam2_checkpoint
+            if capture_profile == "product" and config.sam2_checkpoint
             else None
         )
 
@@ -198,7 +199,9 @@ def process_job(job_id: str, product_id: str, config: WorkerConfig) -> None:
             "FRAME_EXTRACTION": lambda: run_extract(video_path, workdir / "frames"),
             "POSE_ESTIMATION": lambda: run_sfm(workdir, Path(config.vocab_tree)),
             "TRAINING": lambda: run_train(workdir),
-            "CLEANUP": lambda: run_cleanup(workdir, segmentation_backend),
+            "CLEANUP": lambda: run_cleanup(
+                workdir, segmentation_backend, capture_profile=capture_profile
+            ),
             "COMPRESSION": lambda: run_compress(workdir),
         }
 
