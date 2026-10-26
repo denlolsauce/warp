@@ -45,8 +45,14 @@ def test_sfm_requires_vocab_tree():
 def test_cleanup_sam2_checkpoint_defaults_to_none():
     args = build_parser().parse_args(["cleanup"])
     assert args.sam2_checkpoint is None
+    assert args.capture_profile == "product"
 
 
 def test_cleanup_accepts_sam2_checkpoint():
     args = build_parser().parse_args(["cleanup", "--sam2-checkpoint", "/ckpt.pt"])
     assert args.sam2_checkpoint == Path("/ckpt.pt")
+
+
+def test_cleanup_accepts_drone_capture_profile():
+    args = build_parser().parse_args(["cleanup", "--capture-profile", "drone"])
+    assert args.capture_profile == "drone"
