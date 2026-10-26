@@ -85,6 +85,17 @@ def test_fetch_video_returns_the_seeded_video(seeded_product):
     video = fetch_video(DATABASE_URL, seeded_product["product_id"])
     assert video.storage_key == "videos/test/product.mp4"
     assert video.duration_sec == 90.0
+    assert video.capture_profile == "product"
+
+
+def test_fetch_video_returns_product_capture_profile(seeded_product):
+    product_id = seeded_product["product_id"]
+    with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
+        conn.execute('UPDATE "Product" SET "captureProfile" = %s WHERE "id" = %s', ("drone", product_id))
+
+    video = fetch_video(DATABASE_URL, product_id)
+
+    assert video.capture_profile == "drone"
 
 
 def test_fetch_video_raises_for_a_product_with_no_video():
