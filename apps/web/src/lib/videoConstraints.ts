@@ -6,7 +6,7 @@ export const MIN_DURATION_SEC = 60;
 export const TARGET_MAX_DURATION_SEC = 4 * 60; // "2-4 minute video" — soft guidance, not a hard reject
 export const MAX_RESOLUTION_HEIGHT_PX = 2160; // 4K
 export const MAX_FPS = 60;
-export const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB
+export const MAX_FILE_SIZE_BYTES = 2_000_000_000; // Fits the upload-session Postgres Int fields.
 export const MULTIPART_PART_SIZE_BYTES = 8 * 1024 * 1024; // 8 MB, above R2/S3's 5 MB part minimum
 
 export const CAPTURE_CHECKLIST = [

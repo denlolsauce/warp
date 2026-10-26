@@ -46,3 +46,10 @@ apps/web/prisma/dev.db
 
 .vercel
 .env*
+
+# Local preview evidence and user attachments
+.hoplite/artifacts/
+.hoplite/attachments/
+
+# Project-scoped Python dependency cache
+.cache/
