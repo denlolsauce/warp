@@ -1,0 +1,13 @@
+[project]
+name = "maritime-coverage-simulation"
+version = "0.1.0"
+description = "Reproducible constrained five-drone maritime coverage optimization"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2.0,<3", "shapely>=2.0,<3"]
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
