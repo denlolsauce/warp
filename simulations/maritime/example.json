@@ -1,0 +1,17 @@
+{
+  "width_m": 10000,
+  "height_m": 10000,
+  "drones": 5,
+  "base": [5000, 10000],
+  "airspeed_mps": 18,
+  "swath_m": 500,
+  "overlap": 0.1,
+  "wind_mps": [4, 0],
+  "cruise_power_w": 650,
+  "hover_power_w": 700,
+  "battery_wh": 1200,
+  "reserve_fraction": 0.2,
+  "yaw_rate_deg_s": 45,
+  "turn_settle_s": 2,
+  "sample_dt_s": 10
+}
