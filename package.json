@@ -8,7 +8,7 @@
   "packageManager": "pnpm@9.15.9",
   "scripts": {
     "build": "pnpm -r run build",
-    "dev": "pnpm -r run dev",
+    "dev": "pnpm -r --parallel run dev",
     "typecheck": "pnpm -r run typecheck",
     "prisma:migrate": "pnpm --filter @portal/web run prisma:migrate",
     "prisma:seed": "pnpm --filter @portal/web run prisma:seed"
