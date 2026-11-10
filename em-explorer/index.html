@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>E&amp;M Explorer</title>
+    <meta name="description" content="Interactive study site for Electricity and Magnetism: concepts, experiments and formulas with simulations." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <button id="menu-btn" class="menu-btn" type="button" aria-label="Toggle navigation">☰</button>
+      <a class="brand" href="#/"><span class="brand-bolt">⚡</span> E&amp;M <span>Explorer</span></a>
+      <div class="search-box">
+        <input id="search" type="search" placeholder="Search topics, formulas, experiments…  ( / )" autocomplete="off" aria-label="Search" />
+        <div id="search-drop" class="search-drop" hidden></div>
+      </div>
+    </header>
+    <div class="layout">
+      <nav id="nav" class="sidebar" aria-label="Chapters"></nav>
+      <main id="main" tabindex="-1"></main>
+    </div>
+
+    <!-- Classic scripts (not modules) so the site also works when index.html is opened straight from disk. -->
+    <script src="js/core.js"></script>
+    <script src="js/components.js"></script>
+    <script src="js/chapters/c1.js"></script>
+    <script src="js/chapters/c2.js"></script>
+    <script src="js/chapters/c3.js"></script>
+    <script src="js/chapters/c4.js"></script>
+    <script src="js/chapters/c5.js"></script>
+    <script src="js/chapters/c6.js"></script>
+    <script src="js/app.js"></script>
+  </body>
+</html>
