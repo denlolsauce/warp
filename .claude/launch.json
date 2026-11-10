@@ -12,6 +12,12 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@portal/web", "run", "dev"],
       "port": 3000
+    },
+    {
+      "name": "em-explorer",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4173", "--bind", "0.0.0.0", "--directory", "em-explorer"],
+      "port": 4173
     }
   ]
 }
